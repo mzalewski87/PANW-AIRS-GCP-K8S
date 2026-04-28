@@ -1,0 +1,158 @@
+# ═══════════════════════════════════════════════════════════════════
+#  API Runtime Intercept Chatbot – Kubernetes Deployment
+#  Protected by AIRS SDK (direct API scanning)
+#  Protection mode: API Runtime Intercept
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-api-chatbot
+  labels:
+    app: ai-api-chatbot
+    airs-mode: api-runtime-intercept
+    env: demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-chatbot-sa
+  namespace: ai-api-chatbot
+  annotations:
+    # Workload Identity – binds KSA to GSA (substitute __PROJECT_ID__ at deploy time)
+    iam.gke.io/gcp-service-account: "airs-ai-app-sa@__PROJECT_ID__.iam.gserviceaccount.com"
+  labels:
+    app: api-chatbot
+---
+# ConfigMap with non-sensitive configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-chatbot-config
+  namespace: ai-api-chatbot
+data:
+  GCP_LOCATION: "us-central1"
+  VERTEX_AI_MODEL: "gemini-2.5-flash"
+  AIRS_API_ENDPOINT: "__AIRS_ENDPOINT__"
+  AIRS_SECURITY_PROFILE_NAME: "__AIRS_PROFILE__"
+---
+# Secret for AIRS API Key (managed via External Secrets or manually)
+# OPTION A: Manual creation (for the demo)
+# kubectl create secret generic airs-api-secret \
+#   --from-literal=AIRS_API_KEY="your-api-key-from-scp" \
+#   -n ai-api-chatbot
+#
+# OPTION B: External Secrets Operator (recommended for production)
+# Terraform creates the secret in Secret Manager (airs-api-key)
+# ESO syncs it into a K8s Secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-chatbot
+  namespace: ai-api-chatbot
+  labels:
+    app: api-chatbot
+    version: "1.0"
+    airs-protection: api-runtime-intercept
+    k8s-app: api-chatbot
+  annotations:
+    # Tag for the Tag Collector – syncs with the DAG in SCM
+    airs.paloaltonetworks.com/protection: "api-runtime-intercept"
+    airs.paloaltonetworks.com/app: "gemini-api-chatbot"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-chatbot
+  template:
+    metadata:
+      labels:
+        app: api-chatbot
+        airs-mode: api-runtime-intercept
+        k8s-app: api-chatbot
+        env: demo
+    spec:
+      serviceAccountName: api-chatbot-sa
+
+      containers:
+        - name: api-chatbot
+          image: REGISTRY_PLACEHOLDER/api-chatbot:latest
+          # After the image is built: us-central1-docker.pkg.dev/PROJECT_ID/airs-ai-chatbot/api-chatbot:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8080
+              name: http
+
+          envFrom:
+            - configMapRef:
+                name: api-chatbot-config
+
+          env:
+            # GCP_PROJECT_ID – set by deploy-app.sh (ConfigMap ai-chatbot-env)
+            # or manually: kubectl create configmap api-chatbot-env --from-literal=GCP_PROJECT_ID=<PROJECT_ID> -n ai-api-chatbot
+            - name: GCP_PROJECT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: api-chatbot-env
+                  key: GCP_PROJECT_ID
+                  optional: true
+            # AIRS API Key – pulled from a Kubernetes Secret
+            # The secret must exist before the deployment!
+            # kubectl create secret generic airs-api-secret \
+            #   --from-literal=AIRS_API_KEY="<key from SCP>" -n ai-api-chatbot
+            - name: AIRS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airs-api-secret
+                  key: AIRS_API_KEY
+                  optional: true   # true = run without AIRS if the secret is missing
+            # i18n – switchable via scripts/switch-language.sh
+            - name: APP_LANG
+              value: "en"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+      # Tolerations and affinity isolate this from the Network Intercept chatbot
+      nodeSelector:
+        kubernetes.io/os: linux
+---
+# HorizontalPodAutoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-chatbot-hpa
+  namespace: ai-api-chatbot
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-chatbot
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

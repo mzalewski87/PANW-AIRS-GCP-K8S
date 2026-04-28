@@ -1,0 +1,67 @@
+---
+# Service – Network Intercept chatbot endpoint
+# Type LoadBalancer: public IP
+# IP ACL (loadBalancerSourceRanges) is set by deploy-app.sh
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-chatbot
+  namespace: ai-chatbot
+  labels:
+    app: ai-chatbot
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: LoadBalancer
+  selector:
+    app: ai-chatbot
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+
+---
+# HorizontalPodAutoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ai-chatbot-hpa
+  namespace: ai-chatbot
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-chatbot
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+---
+# ConfigMap – application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-chatbot-config
+  namespace: ai-chatbot
+data:
+  VERTEX_AI_LOCATION: "us-central1"
+  VERTEX_AI_MODEL: "gemini-2.5-flash"
+  APP_PORT: "8080"
+  APP_ENV: "demo"
+  LOG_LEVEL: "INFO"
+  # SYSTEM_PROMPT is intentionally empty so the app falls back to the
+  # localized prompt from i18n/<APP_LANG>.json (system.default_system_prompt).
+  # Override here if you want a fixed prompt regardless of language.

@@ -1,0 +1,142 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+#  AI Chatbot Deployment – GKE
+#  Web chatbot using Vertex AI (Gemini)
+#  Traffic protected by AIRS VM-Series Network Intercept
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-chatbot
+  namespace: ai-chatbot
+  labels:
+    app: ai-chatbot
+    app.kubernetes.io/name: ai-chatbot
+    app.kubernetes.io/component: web
+    app.kubernetes.io/version: "1.0"
+    airs-inspect: "true"           # Label for the Tag Collector – AIRS picks up this tag
+    environment: demo
+  annotations:
+    description: "AI Chatbot demo – AIRS webinar, protected by Prisma AIRS Network Intercept"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-chatbot
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: ai-chatbot
+        app.kubernetes.io/name: ai-chatbot
+        app.kubernetes.io/component: web
+        airs-inspect: "true"
+      annotations:
+        # PAN CNI chaining – inspection via VM-Series.
+        # On GKE, inspection is driven by a NAMESPACE annotation:
+        #   kubectl annotate namespace ai-chatbot paloaltonetworks.com/firewall=pan-fw
+        # The k8s.v1.cni.cncf.io/networks annotation does NOT work on GKE (requires Multus).
+    spec:
+      serviceAccountName: ai-chatbot-ksa
+
+      # Topology spread for HA
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: ai-chatbot
+
+      containers:
+        - name: ai-chatbot
+          image: us-central1-docker.pkg.dev/PROJECT_ID/airs-ai-chatbot/chatbot:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: ai-chatbot-config
+            - configMapRef:
+                name: ai-chatbot-env
+                optional: true
+
+          env:
+            - name: APP_PORT
+              value: "8080"
+            - name: APP_ENV
+              value: "demo"
+            # i18n – switchable via scripts/switch-language.sh
+            - name: APP_LANG
+              value: "en"
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+          # TCP socket probes (NOT httpGet) – compatible with PAN CNI chaining (PHASE 7).
+          # pan-cni `mode: service` intercepts all egress from the pod (including HTTP
+          # responses to probes). The kubelet→pod request goes through normally, but the
+          # response returns through the tunnel → firewall loses session context → drop →
+          # timeout. A TCP socket probe is just TCP SYN/SYN-ACK – a short session, no HTTP
+          # response cycle, so it works with pan-cni without any conflict.
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          volumeMounts:
+            - name: tmp-volume
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}
+
+      securityContext:
+        fsGroup: 1000
+
+      # Prefer node spread
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - ai-chatbot
+                topologyKey: kubernetes.io/hostname

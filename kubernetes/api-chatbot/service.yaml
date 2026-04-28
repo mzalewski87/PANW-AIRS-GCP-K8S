@@ -1,0 +1,21 @@
+---
+# Service – API Runtime Intercept chatbot endpoint
+# Type LoadBalancer: public IP
+# IP ACL (loadBalancerSourceRanges) is set by deploy-app.sh
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-chatbot
+  namespace: ai-api-chatbot
+  labels:
+    app: api-chatbot
+    airs-mode: api-runtime-intercept
+spec:
+  type: LoadBalancer
+  selector:
+    app: api-chatbot
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP

@@ -1,0 +1,72 @@
+# ═══════════════════════════════════════════════════════════════════
+#  terraform.tfvars.example – AIRS Network Intercept + API Runtime
+#  Copy to terraform.tfvars and fill in values:
+#  cp terraform.tfvars.example terraform.tfvars
+#
+#  ARCHITECTURE:
+#  Our TF creates ONLY the Application VPC (GKE + AI apps).
+#  SCM creates the firewall VPCs (mgmt, untrust, trust) and peers them
+#  with our App VPC.
+#
+#  DEPLOYMENT ORDER:
+#  1. Fill in this file and run: terraform apply
+#  2. Deploy applications: ./scripts/deploy-app.sh
+#  3. Generate traffic: ./scripts/generate-traffic.sh
+#  4. In SCM: onboard the GCP Cloud Account
+#  5. In SCM: Add Protections → download + apply the SCM deployment TF
+# ═══════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────
+# REQUIRED – fill in before deploying
+# ─────────────────────────────────────────
+project_id = "your-gcp-project-id"   # e.g. "airs-webinar-2024"
+region     = "us-central1"
+zone       = "us-central1-a"
+
+# ─────────────────────────────────────────
+# Application VPC (the only VPC we create)
+# SCM peers its Trust VPC with this network
+# ─────────────────────────────────────────
+app_subnet_cidr   = "10.0.2.0/24"   # CIDR for the application subnet (GKE nodes)
+gke_pods_cidr     = "10.100.0.0/16" # Secondary range – GKE pods
+gke_services_cidr = "10.200.0.0/20" # Secondary range – GKE services
+
+# ─────────────────────────────────────────
+# GKE
+# ─────────────────────────────────────────
+gke_cluster_name   = "airs-ai-cluster"
+gke_node_count     = 2
+gke_machine_type   = "e2-standard-4"
+gke_min_node_count = 1
+gke_max_node_count = 4
+
+# ─────────────────────────────────────────
+# Vertex AI
+# ─────────────────────────────────────────
+vertex_ai_model         = "gemini-2.5-flash"
+vertex_ai_endpoint_name = "airs-gemini-endpoint"
+
+# ─────────────────────────────────────────
+# AIRS API Runtime Intercept
+# API key and profile are generated in SCM
+# ─────────────────────────────────────────
+airs_api_key               = ""                                                    # Paste the API key from SCP
+airs_security_profile_name = "airs-api-chatbot-profile"                            # Profile name from SCM
+airs_api_endpoint          = "https://service.api.aisecurity.paloaltonetworks.com"  # US endpoint
+
+# ─────────────────────────────────────────
+# ⚠️ Access control – REQUIRED!
+# Set this to your public IP BEFORE running deploy-app.sh.
+# Without it, the chatbots will be reachable from the entire internet!
+# ─────────────────────────────────────────
+allowed_mgmt_cidrs = ["203.0.113.0/32"]   # ← CHANGE to your public IP/32
+
+# ─────────────────────────────────────────
+# Labels
+# ─────────────────────────────────────────
+labels = {
+  project     = "airs-webinar"
+  environment = "demo"
+  managed-by  = "terraform"
+  owner       = "your-name"
+}

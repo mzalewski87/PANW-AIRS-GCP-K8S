@@ -1,0 +1,91 @@
+{
+  "_meta": {
+    "lang_code": "en",
+    "html_lang": "en",
+    "js_locale": "en-US"
+  },
+  "page": {
+    "title": "AIRS API Runtime Intercept – AI Chatbot Demo",
+    "header_h1": "🛡️ Prisma AIRS – API Runtime Intercept",
+    "header_subtitle": "AI Chatbot Demo | Vertex AI Gemini | Palo Alto Networks",
+    "mode_badge": "📡 API Runtime Intercept"
+  },
+  "status_bar": {
+    "airs_checking": "AIRS SDK: checking...",
+    "airs_active": "AIRS SDK: active",
+    "airs_inactive": "AIRS SDK: not configured (demo mode)",
+    "vertex_ai": "Vertex AI",
+    "security_profile": "Security Profile",
+    "endpoint": "Endpoint"
+  },
+  "flow": {
+    "user": "👤 User",
+    "airs_pre": "🔍 AIRS<br>Pre-Scan",
+    "vertex": "🤖 Vertex AI<br>Gemini",
+    "airs_post": "🔍 AIRS<br>Post-Scan",
+    "response": "💬 Response"
+  },
+  "welcome": {
+    "html": "👋 Hi! I'm an AI chatbot protected by <strong>Prisma AIRS API Runtime Intercept</strong>.<br><br>Every message you send is <strong>scanned before being forwarded to Gemini</strong>, and the response is <strong>scanned before being delivered to you</strong>.<br><br>Chat freely – AIRS will block unsafe content.",
+    "tag": "🛡️ API Runtime Intercept active"
+  },
+  "input": {
+    "placeholder": "Type a message... (Enter = send, Shift+Enter = newline)",
+    "send": "Send"
+  },
+  "side_panel": {
+    "stats_title": "📊 Scan statistics",
+    "stat_allowed": "Allowed",
+    "stat_blocked": "Blocked",
+    "stat_total": "Total scans",
+    "stat_rate": "Block Rate",
+    "log_title": "🔍 AIRS scan log",
+    "log_empty": "No scans yet – send a message",
+    "demo_title": "🎯 Demo attacks (webinar)",
+    "demo_button": "🔴 Run AIRS attack demo",
+    "info_title": "ℹ️ Protection mode",
+    "info_html": "<strong style=\"color: var(--api-blue);\">API Runtime Intercept</strong><br>The application calls the AIRS SDK directly for each message.<br><br><strong>vs Network Intercept:</strong><br>Network Intercept inspects network traffic via VM-Series.<br>API Runtime analyses content via the SDK."
+  },
+  "client": {
+    "scanning_prompt": "AIRS is scanning the prompt...",
+    "blocked_header": "🚫 Blocked by AIRS",
+    "blocked_tag_prefix": "🛡️",
+    "blocked_default_category": "Policy Violation",
+    "blocked_stage_label": "Stage",
+    "airs_clean_tag": "✅ AIRS: prompt + response scan OK | Profile",
+    "airs_error_tag": "⚠️ AIRS: scan error (fail-open)",
+    "airs_partial_tag": "⚠️ AIRS: partial scan | Profile",
+    "scan_log_blocked": "🚫 BLOCKED",
+    "scan_log_allowed": "✅ ALLOW",
+    "scan_log_category": "Category",
+    "connection_error_prefix": "Connection error: ",
+    "demo_running": "⏳ Running demo attacks...",
+    "demo_results_title": "Demo results",
+    "demo_blocked_label": "🔴 Blocked",
+    "demo_action_blocked": "🚫",
+    "demo_action_allowed": "⚠️",
+    "demo_log_prefix": "Demo",
+    "demo_error_prefix": "Error: "
+  },
+  "system": {
+    "missing_message": "Missing message",
+    "blocked_prompt_message": "Your message was blocked by AIRS for safety reasons.",
+    "blocked_response_message": "The AI model response was blocked by AIRS.",
+    "default_prompt_category": "Policy Violation",
+    "default_response_category": "Unsafe AI Response",
+    "scanner_not_configured": "AIRS Scanner not configured",
+    "scan_error_fail_open": "Scan error – fail-open",
+    "ai_communication_error_prefix": "Error communicating with the AI model: ",
+    "log_scanner_init_ok": "✅ AIRS Scanner initialised",
+    "log_scanner_init_err": "❌ AIRS Scanner init error",
+    "log_scanner_missing": "⚠️  AIRS Scanner not configured – AIRS_API_KEY missing or SDK not installed",
+    "log_sdk_unavailable": "pan-aisecurity SDK not installed – AIRS scanning disabled (demo mode)!",
+    "log_gemini_error": "Gemini API error",
+    "log_chat": "Chat",
+    "log_prompt": "Prompt",
+    "log_block_prompt": "AIRS BLOCK prompt",
+    "log_block_response": "AIRS BLOCK response",
+    "log_scan": "AIRS Scan",
+    "log_scan_error": "AIRS scan error"
+  }
+}

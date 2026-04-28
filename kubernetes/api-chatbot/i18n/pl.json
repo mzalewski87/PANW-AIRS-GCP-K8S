@@ -1,0 +1,91 @@
+{
+  "_meta": {
+    "lang_code": "pl",
+    "html_lang": "pl",
+    "js_locale": "pl-PL"
+  },
+  "page": {
+    "title": "AIRS API Runtime Intercept – AI Chatbot Demo",
+    "header_h1": "🛡️ Prisma AIRS – API Runtime Intercept",
+    "header_subtitle": "AI Chatbot Demo | Vertex AI Gemini | Palo Alto Networks",
+    "mode_badge": "📡 API Runtime Intercept"
+  },
+  "status_bar": {
+    "airs_checking": "AIRS SDK: sprawdzanie...",
+    "airs_active": "AIRS SDK: aktywny",
+    "airs_inactive": "AIRS SDK: nieskonf. (tryb demo)",
+    "vertex_ai": "Vertex AI",
+    "security_profile": "Security Profile",
+    "endpoint": "Endpoint"
+  },
+  "flow": {
+    "user": "👤 Użytkownik",
+    "airs_pre": "🔍 AIRS<br>Pre-Scan",
+    "vertex": "🤖 Vertex AI<br>Gemini",
+    "airs_post": "🔍 AIRS<br>Post-Scan",
+    "response": "💬 Odpowiedź"
+  },
+  "welcome": {
+    "html": "👋 Witaj! Jestem chatbotem AI chronionym przez <strong>Prisma AIRS API Runtime Intercept</strong>.<br><br>Każda Twoja wiadomość jest <strong>skanowana przed wysłaniem do Gemini</strong>, a odpowiedź jest <strong>skanowana przed dostarczeniem do Ciebie</strong>.<br><br>Możesz bezpiecznie rozmawiać – AIRS zablokuje niebezpieczne treści.",
+    "tag": "🛡️ API Runtime Intercept aktywny"
+  },
+  "input": {
+    "placeholder": "Napisz wiadomość... (Enter = wyślij, Shift+Enter = nowa linia)",
+    "send": "Wyślij"
+  },
+  "side_panel": {
+    "stats_title": "📊 Statystyki skanowania",
+    "stat_allowed": "Dozwolone",
+    "stat_blocked": "Zablokowane",
+    "stat_total": "Wszystkie skany",
+    "stat_rate": "Block Rate",
+    "log_title": "🔍 Log skanowania AIRS",
+    "log_empty": "Brak skanów – wyślij wiadomość",
+    "demo_title": "🎯 Demo ataki (webinar)",
+    "demo_button": "🔴 Uruchom Demo Ataków AIRS",
+    "info_title": "ℹ️ Tryb ochrony",
+    "info_html": "<strong style=\"color: var(--api-blue);\">API Runtime Intercept</strong><br>Aplikacja bezpośrednio wywołuje AIRS SDK dla każdej wiadomości.<br><br><strong>vs Network Intercept:</strong><br>Network Intercept inspektuje ruch sieciowy przez VM-Series.<br>API Runtime analizuje treść przez SDK."
+  },
+  "client": {
+    "scanning_prompt": "AIRS skanuje prompt...",
+    "blocked_header": "🚫 Zablokowano przez AIRS",
+    "blocked_tag_prefix": "🛡️",
+    "blocked_default_category": "Policy Violation",
+    "blocked_stage_label": "Stage",
+    "airs_clean_tag": "✅ AIRS: prompt + response skan OK | Profile",
+    "airs_error_tag": "⚠️ AIRS: błąd skanowania (fail-open)",
+    "airs_partial_tag": "⚠️ AIRS: skan niekompletny | Profile",
+    "scan_log_blocked": "🚫 BLOCKED",
+    "scan_log_allowed": "✅ ALLOW",
+    "scan_log_category": "Kategoria",
+    "connection_error_prefix": "Błąd połączenia z serwerem: ",
+    "demo_running": "⏳ Wykonuję demo ataki...",
+    "demo_results_title": "Wyniki demo",
+    "demo_blocked_label": "🔴 Zablokowane",
+    "demo_action_blocked": "🚫",
+    "demo_action_allowed": "⚠️",
+    "demo_log_prefix": "Demo",
+    "demo_error_prefix": "Błąd: "
+  },
+  "system": {
+    "missing_message": "Brak wiadomości",
+    "blocked_prompt_message": "Twoja wiadomość została zablokowana przez AIRS ze względów bezpieczeństwa.",
+    "blocked_response_message": "Odpowiedź modelu AI została zablokowana przez AIRS.",
+    "default_prompt_category": "Policy Violation",
+    "default_response_category": "Unsafe AI Response",
+    "scanner_not_configured": "AIRS Scanner nie skonfigurowany",
+    "scan_error_fail_open": "Błąd skanowania – fail-open",
+    "ai_communication_error_prefix": "Błąd komunikacji z modelem AI: ",
+    "log_scanner_init_ok": "✅ AIRS Scanner zainicjalizowany",
+    "log_scanner_init_err": "❌ Błąd inicjalizacji AIRS Scanner",
+    "log_scanner_missing": "⚠️  AIRS Scanner nie skonfigurowany – AIRS_API_KEY brakuje lub SDK nie zainstalowane",
+    "log_sdk_unavailable": "pan-aisecurity SDK nie zainstalowany – AIRS scanning wyłączony (tryb demo)!",
+    "log_gemini_error": "Błąd Gemini API",
+    "log_chat": "Chat",
+    "log_prompt": "Prompt",
+    "log_block_prompt": "AIRS BLOCK prompt",
+    "log_block_response": "AIRS BLOCK response",
+    "log_scan": "AIRS Scan",
+    "log_scan_error": "Błąd skanowania AIRS"
+  }
+}

@@ -1,0 +1,67 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfstate.d/
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Sensitive data – NEVER commit!
+terraform.tfvars
+*.tfvars
+!terraform.tfvars.example
+secrets/
+secrets.env
+!secrets.env.example
+*.key
+*.pem
+*.p12
+*.json
+!requirements.txt
+!kubernetes/**/i18n/*.json
+deployment-summary-*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+.venv
+pip-log.txt
+
+# Docker
+# .dockerignore files are tracked (needed for builds)
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# GCP credentials
+application_default_credentials.json
+gcloud/
+
+# Logs
+*.log
+logs/
+
+# Generated files
+deployment-summary-*.txt
+kubeconfig
+
+# Local Claude Code context
+CLAUDE.md
+.claude/
