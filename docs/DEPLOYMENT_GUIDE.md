@@ -293,7 +293,9 @@ gcloud beta services identity create \
 1. Log in to **Strata Cloud Manager**
 2. Navigate: **AI Security → AI Runtime → AI Runtime Firewall**
 3. Click the **Cloud Account Manager** icon (cloud) → **Add Cloud Account**
+![SCM: Cloud Account Manager - Add Cloud Account button](scrn001.png)
 4. Select **GCP** → **Next**
+![SCM: Add Cloud Account wizard - select GCP provider](scrn002.gif)
 5. Provide:
    - **Name:** unique name (max 32 characters), e.g. `airs-webinar-gcp`
    - **GCP Project ID:** copy from: `terraform output project_id`
