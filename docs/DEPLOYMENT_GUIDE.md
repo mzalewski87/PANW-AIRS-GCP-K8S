@@ -293,21 +293,21 @@ gcloud beta services identity create \
 1. Log in to **Strata Cloud Manager**
 2. Navigate: **AI Security → AI Runtime → AI Runtime Firewall**
 3. Click the **Cloud Account Manager** icon (cloud) → **Add Cloud Account**
-![SCM: Cloud Account Manager - Add Cloud Account button](scrn001.png)
 4. Select **GCP** → **Next**
-![SCM: Add Cloud Account wizard - select GCP provider](scrn002.gif)
 5. Provide:
    - **Name:** unique name (max 32 characters), e.g. `airs-webinar-gcp`
    - **GCP Project ID:** copy from: `terraform output project_id`
-   - **Bucket Name:** ⚠️ **COPY the exact value** from: `terraform output scm_onboarding_bucket_name`
-     > **NOTE:** Do NOT type it manually! A typo (e.g. a double dash) will cause a `bucket does not exist` error in SCM Terraform.
-6. Click **Next**
-7. Configure **Application Definition**:
+6. In **Permissions** section select **"Discovery"**.
+7. Click **Next**. Configure **Application Definition**:
    - For Container Workloads: **Namespace** (default)
    - For VMs: **VPC/VNET** (default)
+   - For section **Are the cluster workloads private?** select **No**.
+   - **Storage bucket for logs:** ⚠️ **COPY the exact value** from: `terraform output scm_onboarding_bucket_name`
+     > **NOTE:** Do NOT type it manually! A typo (e.g. a double dash) will cause a `bucket does not exist` error in SCM Terraform.
 8. Click **Next**
 9. Provide a **Service Account Name** (3-24 characters, lowercase letters and digits)
 10. **Download Terraform** — SCM generates its own Terraform for onboarding
+![SCM GCP Discovery configuration](scrn001.gif)
 11. **Apply the downloaded Terraform:**
     ```bash
     cd <downloaded-folder>/gcp
