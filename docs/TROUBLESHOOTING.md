@@ -23,6 +23,8 @@
 16. [Pod→firewall trust 100% packet loss (FW rule blocks pod CIDR)](#16-podfirewall-trust-100-packet-loss-fw-rule-blocks-pod-cidr)
 17. [External ELB → firewall → NodePort timeout (app VPC FW blocks trust subnet)](#17-external-elb--firewall--nodeport-timeout-app-vpc-fw-blocks-trust-subnet)
 18. [External LB timeout from internet, only health-checks visible in SCM Logs](#18-external-lb-untrust-elb-timeout-from-internet-only-health-checks-visible-in-scm-logs)
+19. [Both apps time out from your browser, nothing wrong in the cluster](#19-both-apps-time-out-from-your-browser-nothing-wrong-in-the-cluster)
+20. [`deploy-app.sh` aborts: no node carries airs-cni=enabled](#20-deploy-appsh-aborts-no-node-carries-airs-cnienabled)
 
 ---
 
@@ -719,63 +721,65 @@ Create in SCM (folder gcp-airs):
 
 After the push the pods will come back as Ready and traffic will be visible in SCM Logs.
 
-### Root cause #2 (less common): TCP probes timeout despite Traffic Object
+### Root cause #2: the kubelet cannot reach the pod IP at all (XDP tunnel)
 
-If the Traffic Object is configured but probes still time out:
+If the Traffic Object is configured and pods **still** restart-loop on probes, the app
+is almost certainly healthy and the probe path is what is broken.
 
-```
-kubelet (from node) → http://pod-ip:8080/health   (request via the standard path)
-       ↓
-pod application → HTTP 200 OK response             (pod wants to respond)
-       ↓ pan-cni intercepts egress
-       ↓ encapsulates → pan-ngfw-svc → ILB → firewall
-firewall: receives the response packet without a matching session (asymmetric routing)
-       ↓ packet drop
-kubelet: timeout 5s → 3 failures → kill container → restart loop
-```
+Once pan-cni attaches its XDP tunnel to the pod's `eth0`, **nothing originating in the
+node's own network namespace can reach the pod IP**: the reply is steered into the VXLAN
+tunnel toward the firewall instead of back up the veth. The kubelet probes from exactly
+that namespace, so every probe times out while the pod serves normal traffic perfectly.
 
-Old pods (created BEFORE helm install pan-cni) work because they only use
-the basic GKE CNI, without chaining.
+Measured on this deployment — same pod, same moment:
 
-### Fix (recommended, baked into the repo since commit e7dc4e5+)
+| Source | Result |
+|---|---|
+| Inside the pod → `127.0.0.1:8080` | ✅ 200 |
+| Another pod, another node → pod IP | ✅ 200 |
+| `hostNetwork` pod on **another** node → pod IP | ✅ 200 |
+| `hostNetwork` pod on the **same** node → pod IP | ❌ timeout |
+| Node IP `10.0.2.x` and veth gw `10.100.x.1` as source | ❌ timeout |
+| Through the LoadBalancer | ✅ 200 |
 
-In `kubernetes/app/deployment.yaml` use **TCP socket probes** instead of HTTP:
+Non-chained pods on the same node stay Ready throughout — this is specific to chaining.
+
+> 🔴 **`tcpSocket` does NOT avoid this.** An earlier revision of this guide claimed a TCP
+> probe works because it is "just SYN/SYN-ACK, no HTTP cycle through the tunnel". That is
+> wrong: the SYN-ACK takes the same broken return path, so a TCP probe fails exactly like
+> an HTTP one. Do not switch to `tcpSocket` — it wastes a debugging cycle.
+
+### Fix: `exec` probes against 127.0.0.1
+
+An exec probe runs **inside the pod's netns**, so loopback never enters the tunnel.
+Already shipped in `kubernetes/app/deployment.yaml`:
 
 ```yaml
-# Instead of:
 livenessProbe:
-  httpGet:
-    path: /health
-    port: 8080
-  ...
-
-# Use:
-livenessProbe:
-  tcpSocket:
-    port: 8080
+  exec:
+    command:
+      - python3
+      - -c
+      - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8080/health",timeout=5).status==200 else 1)
   initialDelaySeconds: 30
   periodSeconds: 15
-  timeoutSeconds: 5
+  timeoutSeconds: 10
   failureThreshold: 3
 ```
 
-**Why TCP works with pan-cni:**
-- TCP socket probe = TCP SYN → SYN-ACK → ACK → RST/FIN (a short 4-packet session)
-- No HTTP request/response cycle through the pan-cni tunnel
-- Pan-cni treats short TCP probes differently from long HTTP traffic
-- The Flask + gunicorn application listens on :8080 → SYN-ACK = OK
+Nothing is lost in coverage: loopback is not traffic you would want the firewall to
+inspect anyway, and unlike `tcpSocket` this still verifies the app actually answers on
+`/health`, not merely that the port is open.
 
-**Trade-off vs HTTP probe:**
-- HTTP probe: detects an app crash even when the process is up
-- TCP probe: only detects whether the port is listening (if the process is alive but the app crashed internally, the probe still passes)
-
-For our setup (gunicorn + Flask, simple load) the TCP probe is sufficient.
+**Cost:** one `python3` process per probe. At `periodSeconds` 15/10 on a 2-replica demo
+that is noise. For a high-replica production workload add a `startupProbe` and lengthen
+the periods rather than reverting to `tcpSocket`.
 
 ### Verification after the fix
 ```bash
 kubectl apply -f kubernetes/app/deployment.yaml
-watch kubectl get pods -n ai-chatbot
-# After ~1-2 min: new pods Ready 1/1, restart=0; old ones removed
+kubectl rollout status deployment/ai-chatbot -n ai-chatbot --timeout=300s
+kubectl get pods -n ai-chatbot     # Ready 1/1, RESTARTS 0
 ```
 
 Check in SCM Log Viewer → Firewall/Traffic → filter `Source Address contains 10.100`:
@@ -783,7 +787,9 @@ traffic with the real pod IPs (10.100.x.x) = **CNI chaining works, ai-chatbot is
 
 ### Alternative solutions (NOT recommended)
 - **A**: Modify firewall security policy + MTU – requires deep tunnel debug, uncertain
-- **C**: Per-pod annotation `paloaltonetworks.com/subnetfirewall=ns-secure/bypassfirewall` – bypass for the local subnet, requires subnet group config (not out-of-the-box on GKE)
+- **B**: `tcpSocket` probes – does not work, see the warning above
+- **C**: Bypassing the pod CIDR itself via SubnetInfo – would make the probe work by
+  removing the pod from inspection, i.e. defeating the entire point of Network Intercept
 
 ---
 
@@ -806,59 +812,43 @@ From the pod `ping 10.1.2.x` = 100% packet loss.
 
 ### Root cause
 
-**The SCM helm chart creates an EndpointSlice with `conditions: {}` (empty).**
-Cilium on GKE Dataplane V2 treats an endpoint without `ready: true` as
+**The SCM / official PANW helm chart creates an EndpointSlice with `conditions: {}`
+(empty).** Cilium on GKE Dataplane V2 treats an endpoint without `ready: true` as
 NOT-routable → packets from VXLAN to the ClusterIP `pan-ngfw-svc` are
 dropped before reaching the ILB. The whole CNI chaining flow dies here.
-The community helm chart (`r-airs-cni/airs-cni`) creates an EndpointSlice
-without that field — Cilium defaults missing `conditions` to `ready=true`.
 
 ```yaml
-# SCM chart (does NOT work):
+# SCM / official chart, as rendered:
 endpoints:
 - addresses: [10.1.2.253]
-  conditions: {}    # ← empty, Cilium drop
-
-# community helm chart (works):
-endpoints:
-  - addresses: [10.1.2.253]
-  # conditions field ABSENT = default ready=true
+  conditions: {}    # ← empty, Cilium drops
 ```
 
-### Fix: switch to the community helm chart
-
-```bash
-# 1. Remove SCM chart
-helm uninstall ai-runtime-security -n kube-system
-
-# 2. Add community helm repo + install
-helm repo add r-airs-cni https://rweglarz.github.io/c-airs-helm/
-helm repo update
-
-# Find the firewall ILB IP:
-TRUST_ILB=$(gcloud compute forwarding-rules list --project=$PROJECT_ID \
-  --filter="region:us-central1 AND IPProtocol=UDP" \
-  --format="value(IPAddress)" | head -1)
-echo "Trust ILB: $TRUST_ILB"
-
-# Install
-helm install airs r-airs-cni/airs-cni -n kube-system \
-  --set deployTo=gke \
-  --set "endpoints[0].ip"=$TRUST_ILB \
-  --set "fwtrustcidr=10.1.2.0/24"
-
-# 3. Restart application
-kubectl rollout restart deployment/ai-chatbot -n ai-chatbot
-```
-
-### Quick patch (fallback if you MUST use the SCM chart)
+### Fix: patch the EndpointSlice (stay on the SCM/official chart)
 
 ```bash
 kubectl patch endpointslice pan-ngfw-svc-endpoints -n kube-system --type=json \
   -p='[{"op":"replace","path":"/endpoints/0/conditions","value":{"ready":true,"serving":true,"terminating":false}}]'
+
+# Verify:
+kubectl get endpointslice pan-ngfw-svc-endpoints -n kube-system \
+  -o jsonpath='{.endpoints[0].conditions}{"\n"}'
+# {"ready":true,"serving":true,"terminating":false}
+
+kubectl rollout restart deployment/ai-chatbot -n ai-chatbot
 ```
 
-⚠️ The patch is LIVE – `helm upgrade` of the SCM chart will overwrite it. You need to reapply after every upgrade.
+✅ Verified on a GKE 1.34 Dataplane V2 cluster: the patch **persists** — the
+EndpointSlice is chart-managed and no controller reconciles it back.
+⚠️ `helm upgrade` / reinstall re-templates it — reapply after every chart upgrade.
+
+> **Why not the community chart?** `r-airs-cni/airs-cni` renders the EndpointSlice
+> without the `conditions` field (Cilium then defaults it to `ready=true`), so it also
+> works — but it is not PANW-supported. The SCM chart is byte-for-byte the official
+> [`PaloAltoNetworks/prisma-airs-helm`](https://github.com/PaloAltoNetworks/prisma-airs-helm)
+> with the `deployTo: gke` branches pre-resolved, so the supported path is the SCM chart
+> plus this patch. The only other thing the community chart adds is the `SubnetInfo` CR
+> instances — reproduced in `kubernetes/cni/subnetinfo-bypass.yaml`.
 
 ---
 
@@ -981,6 +971,81 @@ just the gateway.
 > The firewall web GUI listens on :443 (mgmt console). 209.85.0.0/16 was permitted
 > in the default rule, but your public IP was not. After adding `0.0.0.0/0` on 80/443
 > both paths (DNAT → app on :80, web GUI on :443) work for all sources.
+
+---
+
+## 19. Both apps time out from your browser, nothing wrong in the cluster
+
+### Symptom
+`curl` and the browser both hang and eventually time out against **both**
+LoadBalancer IPs. No TCP reset, no HTTP status — the connection simply never
+establishes. Meanwhile everything inside the cluster is green:
+
+```bash
+kubectl get pods -A          # all Running 1/1
+kubectl get nodes            # all Ready
+kubectl logs -n ai-api-chatbot -l app=api-chatbot --tail=20
+# ← the request never even appears in the log
+```
+
+That last line is the tell: the packet is dropped by GCP before it reaches a pod.
+
+### Root cause
+`loadBalancerSourceRanges` on both services still pins a **previous public IP**.
+`deploy-app.sh` writes it from `allowed_mgmt_cidrs` in `terraform.tfvars`, and your IP
+changed since — new ISP lease, different network, VPN toggled, tethering.
+
+### Fix
+```bash
+curl -s https://ifconfig.me; echo                       # your IP now
+kubectl get svc ai-chatbot -n ai-chatbot -o jsonpath='{.spec.loadBalancerSourceRanges}'; echo
+
+MYIP="$(curl -s https://ifconfig.me)/32"
+kubectl patch svc ai-chatbot  -n ai-chatbot     --type=merge -p "{\"spec\":{\"loadBalancerSourceRanges\":[\"$MYIP\"]}}"
+kubectl patch svc api-chatbot -n ai-api-chatbot --type=merge -p "{\"spec\":{\"loadBalancerSourceRanges\":[\"$MYIP\"]}}"
+# Propagation takes ~30-60 s. Then re-test /health on both IPs.
+```
+
+Also update `allowed_mgmt_cidrs` in `terraform.tfvars` — otherwise the next
+`deploy-app.sh` reinstates the stale IP.
+
+> 💡 On a conference/hotel network your IP may change mid-event. If you cannot risk it,
+> `kubectl port-forward` bypasses the LB ACL entirely (§ 4.x in the deployment guide),
+> but note that port-forward traffic does **not** traverse the firewall — it is fine for
+> the API Runtime demo and useless for the Network Intercept one.
+
+---
+
+## 20. `deploy-app.sh` aborts: no node carries airs-cni=enabled
+
+### Symptom
+```
+❌ ABORT: no node carries the label airs-cni=enabled.
+```
+
+### Root cause
+`kubernetes/app/deployment.yaml` pins `ai-chatbot` with `nodeSelector: airs-cni=enabled`
+— the same label pan-cni is confined to. Network Intercept only inspects a pod if
+pan-cni ran on **its** node, so an unpinned pod would be a silent fail-open. The
+Terraform-managed pool sets the label; a hand-created pool (§ 3.3b rescue path) does not
+unless you passed `--node-labels=airs-cni=enabled`.
+
+### Fix
+```bash
+# Which pools exist, and which nodes carry the label:
+kubectl get nodes -L cloud.google.com/gke-nodepool,airs-cni
+
+# Label an existing pool's nodes (immediate, but lost when nodes are recreated):
+kubectl label nodes -l cloud.google.com/gke-nodepool=<pool> airs-cni=enabled
+
+# Durable — set it on the pool itself:
+gcloud container node-pools update <pool> --cluster=airs-ai-cluster \
+  --region=$REGION --node-labels=airs-cni=enabled
+```
+
+If you are running **API Runtime Intercept only** (no firewall, no CNI chaining), remove
+the `nodeSelector` block from `kubernetes/app/deployment.yaml` — the label serves no
+purpose without pan-cni.
 
 ---
 

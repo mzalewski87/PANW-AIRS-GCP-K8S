@@ -43,6 +43,23 @@ spec:
     spec:
       serviceAccountName: ai-chatbot-ksa
 
+      # 🔴 Pin to CNI-capable nodes – the same label the pan-cni DaemonSet uses
+      # (kubernetes/cni/values-pan-cni.yaml → extraNodeSelector).
+      #
+      # Network Intercept only inspects a pod if pan-cni ran on ITS node. Scheduling
+      # ai-chatbot onto a node without the DaemonSet produces a pod that works
+      # perfectly and is silently uninspected — the same fail-open shape as a wrong
+      # AIRS profile name, and just as invisible in a demo.
+      #
+      # The Terraform node pool sets this label on every node, so on a fresh deploy
+      # this is a no-op. It matters on a mixed cluster, where a 1.35+ pool cannot run
+      # pan-cni (CNI spec 1.1.0) and must not receive these pods.
+      #
+      # api-chatbot deliberately has NO such selector: its protection is the AIRS SDK
+      # (API Runtime Intercept), it must NOT be chained, and it runs anywhere.
+      nodeSelector:
+        airs-cni: enabled
+
       # Topology spread for HA
       topologySpreadConstraints:
         - maxSkew: 1
@@ -85,26 +102,49 @@ spec:
               cpu: "1000m"
               memory: "1Gi"
 
-          # TCP socket probes (NOT httpGet) – compatible with PAN CNI chaining (PHASE 7).
-          # pan-cni `mode: service` intercepts all egress from the pod (including HTTP
-          # responses to probes). The kubelet→pod request goes through normally, but the
-          # response returns through the tunnel → firewall loses session context → drop →
-          # timeout. A TCP socket probe is just TCP SYN/SYN-ACK – a short session, no HTTP
-          # response cycle, so it works with pan-cni without any conflict.
+          # 🔴 EXEC probes, not tcpSocket and not httpGet – required under PAN CNI
+          # chaining (PHASE 7).
+          #
+          # Once pan-cni attaches its XDP tunnel to the pod's eth0, NOTHING from the
+          # node's own network namespace can reach the pod IP: the reply is steered
+          # into the VXLAN tunnel toward the firewall instead of back up the veth, and
+          # the kubelet times out. This was measured on the live cluster — from the
+          # node, both `10.0.2.x` (node IP) and `10.100.x.1` (veth gateway) as source
+          # time out against the pod's 8080, while the very same pod answers fine from
+          # another node, from another pod, and through the LoadBalancer.
+          #
+          # tcpSocket does NOT dodge this. The bare SYN is subject to the same return
+          # path, so a TCP probe fails exactly like an HTTP one — the pod ends up in a
+          # liveness restart loop and never reaches Ready. (An earlier revision of this
+          # file claimed otherwise; it was wrong.)
+          #
+          # An exec probe runs INSIDE the pod's netns and talks to 127.0.0.1, which
+          # never enters the tunnel. Loopback is also not something you would want the
+          # firewall to inspect, so nothing is lost in coverage.
+          #
+          # Cost: exec spawns a python3 process per probe. With periodSeconds 15/10 on
+          # a 2-replica demo that is noise. For a high-replica production workload,
+          # prefer a startupProbe + longer periods over reverting to tcpSocket.
           livenessProbe:
-            tcpSocket:
-              port: 8080
+            exec:
+              command:
+                - python3
+                - -c
+                - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8080/health",timeout=5).status==200 else 1)
             initialDelaySeconds: 30
             periodSeconds: 15
-            timeoutSeconds: 5
+            timeoutSeconds: 10
             failureThreshold: 3
 
           readinessProbe:
-            tcpSocket:
-              port: 8080
+            exec:
+              command:
+                - python3
+                - -c
+                - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8080/ready",timeout=5).status==200 else 1)
             initialDelaySeconds: 10
             periodSeconds: 10
-            timeoutSeconds: 5
+            timeoutSeconds: 10
             failureThreshold: 3
 
           securityContext:

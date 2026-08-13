@@ -23,6 +23,12 @@ secrets.env
 *.pem
 *.p12
 *.json
+# SSH keypairs (e.g. generated for VM-Series mgmt access)
+*.pub
+id_rsa*
+id_ed25519*
+test
+test.pub
 !requirements.txt
 !kubernetes/**/i18n/*.json
 deployment-summary-*.txt

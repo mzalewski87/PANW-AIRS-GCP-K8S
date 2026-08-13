@@ -117,14 +117,22 @@ kubectl create namespace ai-chatbot --dry-run=client -o yaml | kubectl apply -f 
 # Namespace annotations for pan-cni (idempotent — safe to re-run)
 # ─────────────────────────────────────────
 # 1. firewall=pan-fw → pan-cni hooks pods in this namespace (CNI chaining)
-# 2. subnetfirewall=kube-system/bypass-metadata → traffic to 169.254.169.254 bypasses
-#    the firewall (Workload Identity must fetch its token directly from GCP metadata).
-#    The SubnetInfo CRD `bypass-metadata` is created by the community helm chart.
-#    Without this annotation pods can't fetch a token → Gemini API call fails.
+# 2. subnetfirewall=ai-chatbot/bypass-metadata-and-internal → traffic to
+#    169.254.169.254 and to RFC1918 bypasses the firewall (Workload Identity must
+#    fetch its token directly from GCP metadata; east-west stays local).
+#    The `subnetinfos` CRD comes from the SCM/official helm chart, but that chart
+#    ships NO CR instances — apply kubernetes/cni/subnetinfo-bypass.yaml in PHASE 7
+#    (see DEPLOYMENT_GUIDE § 9.2 step 5) or this annotation dangles.
+#    Without the annotation AND the CR, pods can't fetch a token → Gemini call fails.
+#
+#    🔴 The reference MUST be namespace-local. pan-cni 4.0.2 rejects cross-namespace
+#    SubnetInfo refs, so a `kube-system/...` value fails the pod sandbox outright:
+#      PAN: cross-namespace SubnetInfo ref "kube-system/…" not allowed (pod ns="ai-chatbot")
+#    and the pod hangs in ContainerCreating forever.
 kubectl annotate namespace ai-chatbot \
   paloaltonetworks.com/firewall=pan-fw --overwrite
 kubectl annotate namespace ai-chatbot \
-  paloaltonetworks.com/subnetfirewall=kube-system/bypass-metadata --overwrite
+  paloaltonetworks.com/subnetfirewall=ai-chatbot/bypass-metadata-and-internal --overwrite
 
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
@@ -146,6 +154,34 @@ kubectl create configmap ai-chatbot-env \
   --from-literal=GCP_PROJECT_ID="$PROJECT_ID" \
   --from-literal=VERTEX_AI_LOCATION="$REGION" \
   --dry-run=client -o yaml | kubectl apply -f -
+
+# ─────────────────────────────────────────
+# 🔴 PREFLIGHT: a node must carry the airs-cni label
+#
+# kubernetes/app/deployment.yaml pins ai-chatbot to `nodeSelector: airs-cni=enabled`,
+# the same label pan-cni is confined to. With no such node the pods sit Pending and
+# `kubectl rollout status` below just burns its 300s timeout with no useful message.
+# Terraform labels the managed pool; a hand-made rescue pool (§ 3.3b) needs
+# --node-labels=airs-cni=enabled.
+# ─────────────────────────────────────────
+CNI_NODES=$(kubectl get nodes -l airs-cni=enabled --no-headers 2>/dev/null | wc -l | tr -d ' ')
+if [ "$CNI_NODES" = "0" ]; then
+  echo ""
+  echo "  ❌ ABORT: no node carries the label airs-cni=enabled."
+  echo "     ai-chatbot is pinned to those nodes (Network Intercept only inspects a pod"
+  echo "     if pan-cni ran on ITS node), so the pods would stay Pending forever."
+  echo ""
+  echo "     Fix one of:"
+  echo "       • Terraform-managed pool  → re-apply; modules/gke sets the label"
+  echo "       • Manual / rescue pool    → gcloud container node-pools update <pool> ..."
+  echo "                                   or label the nodes:"
+  echo "         kubectl label nodes -l cloud.google.com/gke-nodepool=<pool> airs-cni=enabled"
+  echo "       • API Runtime Intercept only (no firewall) → drop the nodeSelector from"
+  echo "         kubernetes/app/deployment.yaml"
+  echo ""
+  exit 1
+fi
+echo "  ✅ CNI-capable nodes (airs-cni=enabled): $CNI_NODES"
 
 # Substitute placeholder in deployment and apply
 DEPLOY_YAML=$(cat kubernetes/app/deployment.yaml)
@@ -189,7 +225,20 @@ echo "✅ api-chatbot image built and pushed to Artifact Registry"
 
 # Pull AIRS config from terraform.tfvars BEFORE substitution
 AIRS_API_KEY=$(grep '^airs_api_key' terraform.tfvars 2>/dev/null | head -1 | awk -F'"' '{print $2}' || echo "")
-AIRS_PROFILE=$(grep '^airs_security_profile_name' terraform.tfvars 2>/dev/null | head -1 | awk -F'"' '{print $2}' || echo "airs-api-chatbot-profile")
+# 🔴 No fallback default. A wrong profile name is NOT rejected at deploy time:
+# every AIRS scan returns HTTP 400 "AI Profile not found" and, because scanning
+# fails open, the chatbot answers normally while inspecting nothing. Abort instead.
+AIRS_PROFILE=$(grep '^airs_security_profile_name' terraform.tfvars 2>/dev/null | head -1 | awk -F'"' '{print $2}' || echo "")
+
+if [ -z "$AIRS_PROFILE" ]; then
+  echo ""
+  echo "  ❌ ABORT: airs_security_profile_name is not set in terraform.tfvars."
+  echo "     Use the EXACT profile name from your SCM tenant:"
+  echo "     SCM → AI Runtime Security → API Security → Profiles"
+  echo "     Then verify it before deploying:  ./scripts/verify-airs-profile.sh"
+  echo ""
+  exit 1
+fi
 AIRS_ENDPOINT=$(grep '^airs_api_endpoint' terraform.tfvars 2>/dev/null | head -1 | awk -F'"' '{print $2}' || echo "https://service.api.aisecurity.paloaltonetworks.com")
 
 echo "  AIRS Profile:  $AIRS_PROFILE"

@@ -1,0 +1,69 @@
+# ═══════════════════════════════════════════════════════════════════
+#  SubnetInfo CRs – traffic-steering bypasses for PAN CNI chaining
+#
+#  🔴 WHY THIS FILE EXISTS
+#  The SCM-generated helm chart (= official PANW `ai-runtime-security` chart)
+#  installs the `subnetinfos.paloaltonetworks.com` CRD but ships **no CR
+#  instances**. The `paloaltonetworks.com/subnetfirewall` annotation set on the
+#  ai-chatbot namespace therefore resolves to a non-existent object unless you
+#  apply this file.
+#
+#  Symptom when missing: pods in ai-chatbot cannot reach the GCP metadata
+#  server (169.254.169.254) once CNI chaining is active → Workload Identity
+#  cannot mint a token → the app cannot call the Gemini API.
+#
+#  🔴 THE CR MUST LIVE IN THE POD'S OWN NAMESPACE.
+#  pan-cni 4.0.2 rejects cross-namespace references outright — a
+#  `kube-system/<name>` reference from a pod in ai-chatbot fails the sandbox
+#  with:
+#      PAN: cross-namespace SubnetInfo ref "kube-system/bypass-metadata"
+#      not allowed (pod ns="ai-chatbot")
+#  and the pod is stuck in ContainerCreating forever. Both the CR and the
+#  annotation value must therefore be namespace-local (`ai-chatbot/<name>`).
+#
+#  Apply AFTER `helm install ai-runtime-security` (the CRD must exist first):
+#      kubectl apply -f kubernetes/cni/subnetinfo-bypass.yaml
+#      kubectl annotate namespace ai-chatbot \
+#        paloaltonetworks.com/subnetfirewall=ai-chatbot/bypass-metadata-and-internal \
+#        --overwrite
+#
+#  Syntax: spec.subnetinfo = "BYPASS:<cidr>[,<cidr>...]" (or "INSPECT:...").
+# ═══════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────
+# Combined bypass – metadata + internal east-west. This is the one the
+# ai-chatbot namespace annotation points at: an object can carry only ONE
+# subnetfirewall reference, and this namespace needs both bypasses.
+#
+#   169.254.169.254/32  GCP metadata server – required for Workload Identity
+#                       (Gemini / Vertex AI access). Never inspect this.
+#   10.0.0.0/8          App VPC + pod/service CIDRs + the firewall trust subnet
+#   172.16.0.0/12       RFC1918
+#   192.168.0.0/16      RFC1918
+#   34.118.224.0/20     GKE-managed Service CIDR (kube-dns, control plane)
+#
+# Everything NOT listed here — i.e. all egress to the internet — keeps flowing
+# through the VM-Series, which is exactly what Network Intercept demonstrates.
+# ─────────────────────────────────────────
+apiVersion: "paloaltonetworks.com/v1"
+kind: SubnetInfo
+metadata:
+  name: "bypass-metadata-and-internal"
+  namespace: ai-chatbot
+spec:
+  subnetinfo: "BYPASS:169.254.169.254/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,34.118.224.0/20"
+
+---
+# ─────────────────────────────────────────
+# Metadata-server-only bypass. Not used by default — kept for the case where
+# you deliberately want east-west pod traffic inspected by the firewall too,
+# and only Workload Identity exempted. Swap the namespace annotation to
+# `ai-chatbot/bypass-metadata` to use it.
+# ─────────────────────────────────────────
+apiVersion: "paloaltonetworks.com/v1"
+kind: SubnetInfo
+metadata:
+  name: "bypass-metadata"
+  namespace: ai-chatbot
+spec:
+  subnetinfo: "BYPASS:169.254.169.254/32"

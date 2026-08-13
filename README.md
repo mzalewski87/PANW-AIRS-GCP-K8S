@@ -1,7 +1,7 @@
 # Prisma AIRS on GCP – Webinar Demo
 ## AI Runtime Security: Network Intercept + API Runtime Intercept
 
-> **Repository:** https://github.com/mzalewski87/GCP-AI-WEBINAR-EN  
+> **Repository:** https://github.com/mzalewski87/PANW-AIRS-GCP-K8S  
 > **Deployment guide:** [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)
 
 ---
@@ -42,12 +42,12 @@
 | **Mechanism** | AIRS Firewall inspects network traffic | AIRS SDK scans content |
 | **Firewall** | Required (SCM-generated TF) | Not required |
 | **API key** | Not needed | Required (from SCM) |
-| **AI model** | Gemini 2.5 Flash (Google AI API) | Gemini 2.5 Flash (Google AI API) |
+| **AI model** | `gemini-flash-latest` (Google AI API) | `gemini-flash-latest` (Google AI API) |
 
 ## Repository layout
 
 ```
-GCP-AI-WEBINAR-EN/
+PANW-AIRS-GCP-K8S/
 ├── main.tf                          # Root Terraform (PHASE 1)
 ├── variables.tf                     # Variables
 ├── outputs.tf                       # Outputs for SCM
@@ -64,11 +64,14 @@ GCP-AI-WEBINAR-EN/
 ├── kubernetes/
 │   ├── app/           # Network Intercept Chatbot (Flask + Gemini AI)
 │   ├── api-chatbot/   # API Runtime Intercept Chatbot (Flask + AIRS SDK + Gemini)
-│   ├── cni/           # PAN CNI DaemonSet (reference)
+│   ├── cni/           # values-pan-cni.yaml (Helm values) + subnetinfo-bypass.yaml
+│   │                  # (REQUIRED CRs, chart ships only the CRD) + reference DaemonSet
 │   └── I18N.md        # i18n / language switcher documentation
 │
 ├── scripts/
-│   ├── deploy-app.sh            # Deploy both apps (Cloud Build)
+│   ├── deploy-app.sh            # Deploy both apps (Cloud Build) + AIRS-profile / CNI-node preflight
+│   ├── verify-airs-profile.sh   # 🔴 Run BEFORE deploy-app.sh – a wrong profile fails OPEN (silent)
+│   ├── patch-pan-cni-chart.sh   # Add extraNodeSelector to the SCM chart (upstream hardcodes it)
 │   ├── switch-language.sh       # 🌐 Switch chatbot UI language at runtime (en/pl/...)
 │   ├── generate-traffic.sh      # Generate traffic before SCM onboarding
 │   ├── diagnose-airs.sh         # 🩺 Read-only diagnostics for the whole stack (run first)
@@ -77,7 +80,7 @@ GCP-AI-WEBINAR-EN/
 │   ├── fix-routing.sh           # ⚠️ Fix routing (remove bypass route + default route in App VPC)
 │   ├── fix-health-check.sh      # ⚠️ Fix external LB health check (2 modes: live infra OR --terraform pre-apply)
 │   ├── deploy-tls-decryption.sh # Push AIRS Root CA to GKE (TLS decryption)
-│   ├── deploy-cni.sh            # PAN CNI instructions (community helm chart preferred on GKE)
+│   ├── deploy-cni.sh            # PAN CNI: GKE-version preflight + ns annotations + SCM/official chart instructions
 │   ├── fix-fw-trust-sources.sh  # ⚠️ Add Pod/Service CIDR to trust VPC FW rule (after SCM apply) + trust subnet to app VPC
 │   ├── fix-untrust-web-ingress.sh  # ⚠️ Open GCP FW untrust on TCP/80,443 from internet (after SCM apply)
 │   ├── get-outputs.sh           # Show data for SCM
@@ -101,14 +104,28 @@ cp secrets.env.example secrets.env
 
 # 1. Infrastructure + SCM prerequisites
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars (project_id, region, zone)
+# Edit terraform.tfvars – 5 values matter (see DEPLOYMENT_GUIDE § 3.3):
+#   project_id, region/zone, allowed_mgmt_cidrs (= your public IP, default is 0.0.0.0/0!),
+#   airs_security_profile_name (REQUIRED, no default), airs_api_key
+#
+# 🔴 Network Intercept pins GKE below 1.35.1-gke.1516000 – pan-cni does not implement
+#    the CNI STATUS verb and newer GKE takes every node NotReady. Confirm 1.34 is
+#    still offered before applying (see § 3.3a):
+gcloud container get-server-config --region=$REGION --project=$PROJECT_ID \
+  --format="value(validMasterVersions)" | tr ';' '\n' | grep '^1\.34' | head -1
 terraform init && terraform apply
+
+# 1a. Verify the AIRS profile BEFORE deploying – a wrong name is never rejected,
+#     scans just return 400 and the app answers with NO inspection (fail-open).
+./scripts/verify-airs-profile.sh
 
 # 2. Deploy AI Chatbot apps
 #    The script automatically annotates ns ai-chatbot:
 #    - paloaltonetworks.com/firewall=pan-fw          (CNI chaining)
-#    - paloaltonetworks.com/subnetfirewall=kube-system/bypass-metadata
+#    - paloaltonetworks.com/subnetfirewall=ai-chatbot/bypass-metadata-and-internal
 #                                                     (Workload Identity bypass)
+#      🔴 The SubnetInfo CR must live in the POD's namespace – pan-cni 4.0.2
+#      rejects cross-namespace refs and the pod sandbox fails to create.
 ./scripts/deploy-app.sh
 
 # 2a. (Optional) Switch chatbot UI language at runtime
@@ -149,21 +166,44 @@ terraform init && terraform apply
 ./scripts/fix-untrust-web-ingress.sh
 
 # 7. Helm: install container security
-#    🔴 PREFER the community helm chart (the SCM chart does NOT work properly on GKE Dataplane V2)
-helm repo add r-airs-cni https://rweglarz.github.io/c-airs-helm/
-helm repo update
+#    ✅ Use the SCM-generated chart = the official PANW prisma-airs-helm chart.
+#    🔴 FIRST check the GKE version – pan-cni does NOT implement the CNI STATUS verb,
+#       so on GKE >= 1.35.1-gke.1516000 (CNI spec 1.1.0) the install takes EVERY node
+#       NotReady. deploy-cni.sh aborts on such clusters. See DEPLOYMENT_GUIDE § 3.3a.
+./scripts/deploy-cni.sh            # preflight + namespace annotations
+
+# The chart sits directly in architecture/helm/ (Chart.yaml is there), not in a
+# subdirectory. 'endpoints' must be the UDP trust ILB IP (needs ip_protocol=UDP, § 7.5a):
+CHART=<unzipped>/architecture/helm
 TRUST_ILB=$(gcloud compute forwarding-rules list --project=$PROJECT_ID \
   --filter="region:us-central1 AND IPProtocol=UDP" --format="value(IPAddress)" | head -1)
-helm install airs r-airs-cni/airs-cni -n kube-system \
-  --set deployTo=gke \
-  --set "endpoints[0].ip"=$TRUST_ILB \
-  --set "fwtrustcidr=10.1.2.0/24"
 
-# 7b. GCP FW rules: Pod CIDR to trust VPC + trust subnet to app VPC
+# 7a. Teach the chart to honour a node selector (upstream hardcodes it) and confine
+#     pan-cni to the CNI-capable pool – on a mixed cluster it would otherwise land on
+#     1.35+ nodes and take them NotReady. No-op if extraNodeSelector is unset.
+./scripts/patch-pan-cni-chart.sh $CHART
+# Edit kubernetes/cni/values-pan-cni.yaml: endpoints=$TRUST_ILB, fwtrustcidr, clusterid
+helm install ai-runtime-security $CHART -n kube-system \
+  --values kubernetes/cni/values-pan-cni.yaml
+kubectl get nodes    # all must stay Ready
+
+# 7b. Two REQUIRED post-install steps on GKE Dataplane V2:
+#     (1) the chart writes the EndpointSlice with 'conditions: {}' → Cilium won't route
+kubectl patch endpointslice pan-ngfw-svc-endpoints -n kube-system --type=json \
+  -p='[{"op":"replace","path":"/endpoints/0/conditions","value":{"ready":true,"serving":true,"terminating":false}}]'
+#     (2) the chart ships the subnetinfos CRD but NO CR instances → the
+#         subnetfirewall annotation dangles and Workload Identity breaks.
+#     🔴 The CRs go into ai-chatbot – pan-cni rejects cross-namespace refs.
+kubectl apply -f kubernetes/cni/subnetinfo-bypass.yaml
+
+# 7c. GCP FW rules: Pod CIDR to trust VPC + trust subnet to app VPC
 #     (the first – CNI chaining; the second – DNAT inbound to NodePort)
 ./scripts/fix-fw-trust-sources.sh
 
-# 7c. Restart ai-chatbot so pan-cni hooks the pods
+# 7d. Restart ai-chatbot so pan-cni hooks the pods.
+#     Its probes must be exec (127.0.0.1) – once the XDP tunnel is attached, nothing
+#     from the node netns reaches the pod IP, so httpGet/tcpSocket probes both fail.
+#     kubernetes/app/deployment.yaml already ships them that way.
 kubectl rollout restart deployment/ai-chatbot -n ai-chatbot
 
 # 8. API Runtime: create a profile and API key in SCM
@@ -177,9 +217,26 @@ kubectl create secret generic airs-api-secret \
 #    See: docs/DEPLOYMENT_GUIDE.md section 8.13
 ```
 
+## Before the demo
+
+Run the **pre-demo smoke test** in
+[DEPLOYMENT_GUIDE § 11](docs/DEPLOYMENT_GUIDE.md#-pre-demo-smoke-test-run-this-30-min-before-the-webinar)
+— seven checks, every one of which has failed silently at least once (source-IP drift,
+nodes NotReady, egress bypassing the firewall, TLS decrypt off, wrong AIRS profile).
+The apps keep answering in all of those states, so you would only find out on stage.
+
 ## Something's broken?
 
 ```bash
+# 0. Both apps suddenly time out with no error? Your public IP changed – the LB
+#    source ranges still pin the old one. Fastest check:
+curl -s https://ifconfig.me; echo
+kubectl get svc ai-chatbot -n ai-chatbot -o jsonpath='{.spec.loadBalancerSourceRanges}'; echo
+#    Different → re-patch both services (and update allowed_mgmt_cidrs in tfvars):
+MYIP="$(curl -s https://ifconfig.me)/32"
+kubectl patch svc ai-chatbot  -n ai-chatbot     --type=merge -p "{\"spec\":{\"loadBalancerSourceRanges\":[\"$MYIP\"]}}"
+kubectl patch svc api-chatbot -n ai-api-chatbot --type=merge -p "{\"spec\":{\"loadBalancerSourceRanges\":[\"$MYIP\"]}}"
+
 # 1. Quick diagnostics (read-only) – shows which element of the flow is failing
 ./scripts/diagnose-airs.sh
 

@@ -87,7 +87,7 @@ variable "gke_max_node_count" {
 variable "vertex_ai_model" {
   description = "Vertex AI model (Gemini) to use"
   type        = string
-  default     = "gemini-2.5-flash"
+  default     = "gemini-flash-latest"
 }
 
 variable "vertex_ai_endpoint_name" {
@@ -110,10 +110,20 @@ variable "airs_api_key" {
   default     = ""
 }
 
+# 🔴 NO DEFAULT ON PURPOSE. This must be the EXACT profile name from YOUR SCM
+# tenant (SCM → AI Runtime Security → API Security → Profiles). A wrong or
+# invented name is NOT rejected at deploy time — the AIRS API answers
+# HTTP 400 `AI Profile not found` on every scan, and because the app fails
+# OPEN the chatbot keeps replying while nothing is actually being scanned.
+# A stale default is therefore worse than no default: it looks like it works.
 variable "airs_security_profile_name" {
-  description = "Name of the SCM Security Profile used by the AIRS SDK"
+  description = "EXACT name of the AI security profile from your SCM tenant (e.g. GCP-AI-WEBINAR). Required – verify with scripts/verify-airs-profile.sh before deploying."
   type        = string
-  default     = "airs-api-chatbot-profile"
+
+  validation {
+    condition     = length(trimspace(var.airs_security_profile_name)) > 0
+    error_message = "airs_security_profile_name must be set to the exact profile name from your SCM tenant. Find it in SCM → AI Runtime Security → API Security → Profiles."
+  }
 }
 
 variable "airs_api_endpoint" {

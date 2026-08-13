@@ -1,0 +1,65 @@
+# ═══════════════════════════════════════════════════════════════════
+#  pan-cni Helm values – overrides for the SCM-generated chart
+#
+#  The chart itself is the official PANW `ai-runtime-security` chart that ships
+#  inside the SCM Terraform bundle (architecture/helm/). Do NOT swap it for the
+#  community chart. This file only overrides its values.yaml:
+#
+#      helm install ai-runtime-security <bundle>/architecture/helm \
+#        --namespace kube-system \
+#        -f kubernetes/cni/values-pan-cni.yaml
+#
+#  Deltas vs. the SCM-generated values.yaml, and why each one matters:
+#
+#  1. cniimage pinned to 4.0.2 — the chart ships `:latest`. A silent bump into
+#     an image that speaks a different CNI spec version takes every node
+#     NotReady at 3am. Pin it; upgrade deliberately.
+#
+#  2. fwtrustcidr — the chart ships it EMPTY. Set it to the firewall trust
+#     subnet (SCM's fw-trust-sub, 10.1.2.0/24 here). Read the live value from:
+#         gcloud compute networks subnets list --filter="network~trust" \
+#           --format="value(ipCidrRange)"
+#
+#  3. endpoints — the trust ILB address that fronts the VM-Series. Must be the
+#     UDP forwarding rule (pan-cni sends VXLAN over UDP/6080), not a TCP one:
+#         gcloud compute forwarding-rules list --filter="IPProtocol=UDP" \
+#           --format="value(IPAddress)"
+#
+#  4. extraNodeSelector — NOT part of the upstream chart. See the note below;
+#     it requires the one-line template patch that patch-pan-cni-chart.sh applies.
+# ═══════════════════════════════════════════════════════════════════
+
+# Trust ILB (UDP/6080) in front of the VM-Series – verify before installing.
+endpoints: 10.1.2.253
+
+# 🔴 Never `latest`.
+cniimage: gcr.io/pan-cn-series/airs/pan-cni:4.0.2
+
+# Firewall trust subnet CIDR.
+fwtrustcidr: "10.1.2.0/24"
+
+namespace: kube-system
+
+# Kubernetes ClusterID, range 1-2048. Must be unique per cluster onboarded to
+# the same firewall, otherwise traffic from two clusters is indistinguishable.
+clusterid: 1
+
+# ─────────────────────────────────────────
+# 🔴 Confine the DaemonSet to CNI-capable nodes.
+#
+# pan-cni 4.0.2 advertises CNI spec <= 0.4.0. GKE >= 1.35.1-gke.1516000 writes
+# `"cniVersion": "1.1.0"` into the node's conflist, and containerd 2.x then
+# issues the CNI STATUS verb, which pan-cni answers with
+# `unknown CNI_COMMAND: STATUS` → NetworkPluginNotReady on every node it lands
+# on. Nodes <= 1.34 get `10-gke-ptp.conflist` at cniVersion 0.3.1 and work.
+#
+# Without this selector the DaemonSet lands on EVERY node, including any 1.35+
+# pool, and takes down workloads that have nothing to do with Network Intercept
+# (api-chatbot among them). With it, a 1.35 pool can coexist untouched.
+#
+# The upstream chart hardcodes its nodeSelector, so this key only takes effect
+# after scripts/patch-pan-cni-chart.sh has added the range block to
+# templates/pan-cni.yaml. The Terraform node pool carries this label already.
+# ─────────────────────────────────────────
+extraNodeSelector:
+  airs-cni: enabled

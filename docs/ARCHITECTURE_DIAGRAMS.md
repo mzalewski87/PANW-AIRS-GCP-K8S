@@ -320,7 +320,7 @@
   │     │  AIRS SDK Pre-Scan (pan-aisecurity)                │     │
   │     │                                                    │     │
   │     │  scanner.sync_scan(                                │     │
-  │     │    ai_profile = "airs-api-chatbot-profile",        │     │
+  │     │    ai_profile = "<profile-name-from-SCM>",         │     │
   │     │    content = Content(prompt="user message")        │     │
   │     │  )                                                 │     │
   │     │       │                                            │     │

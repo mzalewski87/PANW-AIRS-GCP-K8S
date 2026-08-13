@@ -129,8 +129,10 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "2️⃣  Routes 0.0.0.0/0 in App VPC"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# NOTE: `network~` (client-side regex), not `network:` — the `:` operator forces
+# server-side evaluation and the Compute API rejects `destRange=0.0.0.0/0` there.
 gcloud compute routes list --project="$PROJECT_ID" \
-  --filter="network:$APP_VPC AND destRange=0.0.0.0/0" \
+  --filter="network~$APP_VPC AND destRange=0.0.0.0/0" \
   --format="table(name,nextHopGateway.basename():label=GATEWAY,nextHopPeering:label=PEERING,priority)" \
   --sort-by=priority 2>&1
 

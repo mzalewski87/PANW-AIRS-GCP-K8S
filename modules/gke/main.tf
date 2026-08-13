@@ -19,6 +19,10 @@ resource "google_container_cluster" "ai_cluster" {
   network    = var.network
   subnetwork = var.subnetwork
 
+  # 🔴 Pinned for PAN CNI compatibility – see variables.tf `kubernetes_version`.
+  # GKE >= 1.35.1-gke.1516000 uses CNI spec 1.1.0, which pan-cni does not implement.
+  min_master_version = var.kubernetes_version
+
   # VPC Native mode (alias IP) – required for the PAN CNI
   networking_mode = "VPC_NATIVE"
 
@@ -85,8 +89,12 @@ resource "google_container_cluster" "ai_cluster" {
   # Allow terraform destroy without manual intervention
   deletion_protection = false
 
+  # 🔴 UNSPECIFIED (no channel) by default. With a release channel GKE auto-upgrades
+  # the control plane past 1.35.1-gke.1516000, which breaks PAN CNI (CNI spec 1.1.0)
+  # and takes every node NotReady. Override via `release_channel` only if you are
+  # NOT using Network Intercept / pan-cni.
   release_channel {
-    channel = "REGULAR"
+    channel = var.release_channel
   }
 
   resource_labels = var.labels
@@ -124,9 +132,16 @@ resource "google_container_node_pool" "ai_nodes" {
     max_node_count = var.max_node_count
   }
 
+  # NOTE: node pool version is deliberately NOT pinned here. On create it inherits
+  # the (pinned) master version, which is what we want. Setting it explicitly would
+  # make `terraform apply` against an already-upgraded cluster attempt a node
+  # DOWNGRADE, which GKE rejects – the apply would fail instead of no-op'ing.
+
   management {
-    auto_repair  = true
-    auto_upgrade = true
+    auto_repair = true
+    # 🔴 Node auto-upgrade OFF – it would drift the nodes past the PAN CNI
+    # version limit (CNI spec 1.1.0). Only valid with release_channel = UNSPECIFIED.
+    auto_upgrade = var.release_channel == "UNSPECIFIED" ? false : true
   }
 
   node_config {
@@ -150,7 +165,12 @@ resource "google_container_node_pool" "ai_nodes" {
       enable_integrity_monitoring = true
     }
 
-    labels = var.labels
+    # `airs-cni = enabled` is the node label the pan-cni DaemonSet is pinned to
+    # (see kubernetes/cni/values-pan-cni.yaml → extraNodeSelector). Keeping the
+    # selector in play even when every pool is CNI-capable means the same Helm
+    # values work for a fresh deploy AND for the rescue pool you add when an
+    # existing cluster has already auto-upgraded past the pan-cni version limit.
+    labels = merge(var.labels, { airs-cni = "enabled" })
 
     tags = ["gke-node", "airs-trust"]
 

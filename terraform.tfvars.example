@@ -43,7 +43,7 @@ gke_max_node_count = 4
 # ─────────────────────────────────────────
 # Vertex AI
 # ─────────────────────────────────────────
-vertex_ai_model         = "gemini-2.5-flash"
+vertex_ai_model         = "gemini-flash-latest"
 vertex_ai_endpoint_name = "airs-gemini-endpoint"
 
 # ─────────────────────────────────────────
@@ -51,7 +51,9 @@ vertex_ai_endpoint_name = "airs-gemini-endpoint"
 # API key and profile are generated in SCM
 # ─────────────────────────────────────────
 airs_api_key               = ""                                                    # Paste the API key from SCP
-airs_security_profile_name = "airs-api-chatbot-profile"                            # Profile name from SCM
+airs_security_profile_name = ""                                                    # 🔴 REQUIRED: EXACT name from SCM → AI Runtime Security → API Security → Profiles
+#                                                                                    Verify with ./scripts/verify-airs-profile.sh BEFORE deploy-app.sh.
+#                                                                                    A wrong name fails OPEN: scans return 400 and nothing is inspected.
 airs_api_endpoint          = "https://service.api.aisecurity.paloaltonetworks.com"  # US endpoint
 
 # ─────────────────────────────────────────

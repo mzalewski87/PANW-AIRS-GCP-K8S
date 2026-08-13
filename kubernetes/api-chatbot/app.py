@@ -71,16 +71,27 @@ app = Flask(__name__)
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
 LOCATION   = os.environ.get("GCP_LOCATION", "us-central1")
-MODEL_ID   = os.environ.get("VERTEX_AI_MODEL", "gemini-2.5-flash")
+MODEL_ID   = os.environ.get("VERTEX_AI_MODEL", "gemini-flash-latest")
 
 # AIRS configuration
 AIRS_API_KEY             = os.environ.get("AIRS_API_KEY", "")
-AIRS_SECURITY_PROFILE    = os.environ.get("AIRS_SECURITY_PROFILE_NAME", "airs-api-chatbot-profile")
+# No fallback default: an invented profile name is not rejected at startup — every
+# scan just returns HTTP 400 "AI Profile not found" and, since scanning fails open,
+# the chatbot keeps answering while nothing is inspected. Empty is loud, wrong is silent.
+AIRS_SECURITY_PROFILE    = os.environ.get("AIRS_SECURITY_PROFILE_NAME", "")
 AIRS_API_ENDPOINT        = os.environ.get("AIRS_API_ENDPOINT", "https://service.api.aisecurity.paloaltonetworks.com")
 
 # Initialise AIRS Scanner
 airs_scanner = None
-if AIRS_AVAILABLE and AIRS_API_KEY:
+if AIRS_AVAILABLE and AIRS_API_KEY and not AIRS_SECURITY_PROFILE:
+    logger.error(
+        "AIRS_SECURITY_PROFILE_NAME is not set — refusing to start the scanner. "
+        "Scanning fails open, so a missing profile would leave the app answering "
+        "with NO inspection at all. Set the exact profile name from your SCM tenant "
+        "(SCM -> AI Runtime Security -> API Security -> Profiles) and verify it with "
+        "scripts/verify-airs-profile.sh."
+    )
+elif AIRS_AVAILABLE and AIRS_API_KEY:
     try:
         aisecurity.init(api_key=AIRS_API_KEY, api_endpoint=AIRS_API_ENDPOINT)
         airs_scanner = AIRSScanner()

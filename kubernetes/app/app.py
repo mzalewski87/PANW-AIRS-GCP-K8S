@@ -67,7 +67,7 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 # Configuration via env vars
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
 VERTEX_AI_LOCATION = os.getenv("VERTEX_AI_LOCATION", "us-central1")
-VERTEX_AI_MODEL = os.getenv("VERTEX_AI_MODEL", "gemini-2.5-flash")
+VERTEX_AI_MODEL = os.getenv("VERTEX_AI_MODEL", "gemini-flash-latest")
 APP_PORT = int(os.getenv("APP_PORT", "8080"))
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", T["system"]["default_system_prompt"])
 

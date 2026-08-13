@@ -41,8 +41,11 @@ echo ""
 # ─────────────────────────────────────────
 echo "FIX 1: Looking for the bypass route..."
 
+# NOTE: use `network~` (client-side regex), NOT `network:` (substring).
+# The `:` operator pushes the whole filter server-side and the Compute API
+# rejects `destRange=0.0.0.0/0` there ("Invalid list filter expression").
 BYPASS_ROUTE=$(gcloud compute routes list --project="$PROJECT_ID" \
-  --filter="network:${APP_VPC} AND name ~ 'bypass'" \
+  --filter="network~${APP_VPC} AND name~bypass" \
   --format="value(name)" | head -1)
 
 if [ -n "$BYPASS_ROUTE" ]; then
@@ -80,8 +83,10 @@ echo ""
 # ─────────────────────────────────────────
 echo "FIX 1b: Looking for the default route..."
 
+# NOTE: destRange MUST stay in the filter. Matching on the name alone also picks up
+# the auto-generated subnet routes `default-route-r-*`, which GCP refuses to delete.
 DEFAULT_ROUTE=$(gcloud compute routes list --project="$PROJECT_ID" \
-  --filter="network:${APP_VPC} AND destRange=0.0.0.0/0 AND name ~ 'default-route'" \
+  --filter="network~${APP_VPC} AND destRange=0.0.0.0/0 AND name~default-route" \
   --format="value(name)" | head -1)
 
 if [ -n "$DEFAULT_ROUTE" ]; then
@@ -139,7 +144,7 @@ echo "════════════════════════�
 echo ""
 echo "Routes 0.0.0.0/0 in ${APP_VPC}:"
 gcloud compute routes list --project="$PROJECT_ID" \
-  --filter="network:${APP_VPC} AND destRange=0.0.0.0/0" \
+  --filter="network~${APP_VPC} AND destRange=0.0.0.0/0" \
   --format="table(name,destRange,nextHopGateway,nextHopPeering,priority)" \
   --sort-by=priority
 
