@@ -3,7 +3,7 @@
 #  teardown-all.sh – Full teardown of the AIRS environment on GCP
 #
 #  Runs the destroy sequence in the correct order:
-#  1. K8s namespaces (ai-chatbot, ai-api-chatbot)
+#  1. K8s namespaces (ai-chatbot, ai-api-chatbot, ai-gw-chatbot)
 #  2. Helm release pan-cni (ai-runtime-security)
 #  3. terraform destroy in SCM application_project (peering)
 #  4. terraform destroy in SCM security_project (FW + LB + VPCs)
@@ -106,11 +106,11 @@ START=$(date +%s)
 # ─────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "1️⃣  K8s namespaces (ai-chatbot, ai-api-chatbot)"
+echo "1️⃣  K8s namespaces (ai-chatbot, ai-api-chatbot, ai-gw-chatbot)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if gcloud container clusters get-credentials "$CLUSTER" --region="$REGION" --project="$PROJECT_ID" 2>/dev/null; then
-  kubectl delete namespace ai-chatbot ai-api-chatbot --timeout=120s --ignore-not-found 2>&1
+  kubectl delete namespace ai-chatbot ai-api-chatbot ai-gw-chatbot --timeout=120s --ignore-not-found 2>&1
 else
   echo "  ⚠️  Cluster $CLUSTER unavailable – skipping (will be removed in step 6)"
 fi

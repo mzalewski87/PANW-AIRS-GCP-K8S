@@ -1,8 +1,9 @@
 # Prisma AIRS on GCP – Webinar Demo
-## AI Runtime Security: Network Intercept + API Runtime Intercept
+## AI Runtime Security: Network Intercept + API Runtime Intercept + AI Gateway Intercept
 
 > **Repository:** https://github.com/mzalewski87/PANW-AIRS-GCP-K8S  
-> **Deployment guide:** [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)
+> **Deployment guide:** [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)  
+> **AI Gateway setup:** [docs/AI_GATEWAY_SETUP.md](docs/AI_GATEWAY_SETUP.md)
 
 ---
 
@@ -16,8 +17,9 @@
 │  │                                                                 │ │
 │  │  airs-app-vpc (10.0.2.0/24) ← Application VPC                   │ │
 │  │    ├── GKE Cluster (airs-ai-cluster)                            │ │
-│  │    │     ├── ai-chatbot (Network Intercept demo)                │ │
-│  │    │     └── api-chatbot (API Runtime Intercept demo)           │ │
+│  │    │     ├── ai-chatbot  (Network Intercept demo)               │ │
+│  │    │     ├── api-chatbot (API Runtime Intercept demo)           │ │
+│  │    │     └── gw-chatbot  (AI Gateway Intercept demo + MCP)      │ │
 │  │    └── Gemini AI API                                            │ │
 │  │                                                                 │ │
 │  │  + GCS bucket, Log Sink, Cloud Asset API (SCM prerequisites)    │ │
@@ -30,19 +32,32 @@
 │  │  fw-trust-vpc ── ILB ── FW nic2 (trust) ←VPC Peering→ App VPC   │ │
 │  │  + Tag Collector VM                                             │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│  OPTIONAL (no GCP resources): AI Gateway Intercept                   │
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │  gw-chatbot ──► Portkey AI Gateway ──► Vertex AI (Claude Haiku) │ │
+│  │                   └── Prisma AIRS guardrail (in the model path) │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Two AIRS protection modes
+## Three AIRS protection modes
 
-| | Network Intercept | API Runtime Intercept |
-|---|---|---|
-| **Application** | `kubernetes/app/` | `kubernetes/api-chatbot/` |
-| **Namespace** | `ai-chatbot` | `ai-api-chatbot` |
-| **Mechanism** | AIRS Firewall inspects network traffic | AIRS SDK scans content |
-| **Firewall** | Required (SCM-generated TF) | Not required |
-| **API key** | Not needed | Required (from SCM) |
-| **AI model** | `gemini-flash-latest` (Google AI API) | `gemini-flash-latest` (Google AI API) |
+| | Network Intercept | API Runtime Intercept | AI Gateway Intercept |
+|---|---|---|---|
+| **Application** | `kubernetes/app/` | `kubernetes/api-chatbot/` | `kubernetes/gw-chatbot/` |
+| **Namespace** | `ai-chatbot` | `ai-api-chatbot` | `ai-gw-chatbot` |
+| **Mechanism** | AIRS Firewall inspects network traffic | AIRS SDK scans content | AIRS guardrail inside the gateway |
+| **Code in the app** | None | SDK calls | None |
+| **Firewall** | Required (SCM-generated TF) | Not required | Not required |
+| **API key** | Not needed | Required (from SCM) | Required (AIRS + Portkey) |
+| **AI model** | `gemini-flash-latest` (Google AI API) | `gemini-flash-latest` (Google AI API) | `claude-haiku-4-5` (Vertex AI) |
+| **Blocks with** | Session drop | SDK verdict `block` | HTTP 446 |
+| **Extra** | TLS decryption | — | MCP tools → indirect injection demo |
+
+The third mode needs **no GCP infrastructure at all** — it is a good fallback
+demo when the firewall stack is unavailable. Setup:
+[docs/AI_GATEWAY_SETUP.md](docs/AI_GATEWAY_SETUP.md).
 
 ## Repository layout
 
@@ -64,12 +79,15 @@ PANW-AIRS-GCP-K8S/
 ├── kubernetes/
 │   ├── app/           # Network Intercept Chatbot (Flask + Gemini AI)
 │   ├── api-chatbot/   # API Runtime Intercept Chatbot (Flask + AIRS SDK + Gemini)
+│   ├── gw-chatbot/    # AI Gateway Intercept Chatbot (Flask + MCP server + Portkey)
+│   │                  # No scanning code – the AIRS guardrail lives in the gateway
 │   ├── cni/           # values-pan-cni.yaml (Helm values) + subnetinfo-bypass.yaml
 │   │                  # (REQUIRED CRs, chart ships only the CRD) + reference DaemonSet
 │   └── I18N.md        # i18n / language switcher documentation
 │
 ├── scripts/
 │   ├── deploy-app.sh            # Deploy both apps (Cloud Build) + AIRS-profile / CNI-node preflight
+│   ├── deploy-gw-chatbot.sh     # 🟣 Deploy the AI Gateway chatbot (independent of the FW stack)
 │   ├── verify-airs-profile.sh   # 🔴 Run BEFORE deploy-app.sh – a wrong profile fails OPEN (silent)
 │   ├── patch-pan-cni-chart.sh   # Add extraNodeSelector to the SCM chart (upstream hardcodes it)
 │   ├── switch-language.sh       # 🌐 Switch chatbot UI language at runtime (en/pl/...)
@@ -89,6 +107,7 @@ PANW-AIRS-GCP-K8S/
 │
 └── docs/
     ├── DEPLOYMENT_GUIDE.md            # Complete deployment instructions
+    ├── AI_GATEWAY_SETUP.md            # 🟣 Portkey + AIRS guardrail (third mode) end-to-end
     ├── SCM_CONFIGURATION_REQUIRED.md  # SCM configuration for CNI chaining
     ├── TROUBLESHOOTING.md             # 🆘 Concrete symptoms → root cause → fix
     └── ARCHITECTURE_DIAGRAMS.md       # Architecture diagrams
@@ -129,10 +148,12 @@ terraform init && terraform apply
 ./scripts/deploy-app.sh
 
 # 2a. (Optional) Switch chatbot UI language at runtime
-#     Both chatbots ship with an i18n system. Default language is English (en);
-#     Polish (pl) is bundled. Translation files: kubernetes/{app,api-chatbot}/i18n/<lang>.json
+#     All chatbots ship with an i18n system. Default language is English (en);
+#     Polish (pl) is bundled.
+#     Translation files: kubernetes/{app,api-chatbot,gw-chatbot}/i18n/<lang>.json
 #     See kubernetes/I18N.md for full details (adding new languages, ConfigMap layout, etc.)
-./scripts/switch-language.sh pl   # switch both chatbots to Polish
+#     Covers all three chatbots; ones that aren't deployed are skipped.
+./scripts/switch-language.sh pl   # switch every deployed chatbot to Polish
 ./scripts/switch-language.sh en   # switch back to English
 
 # 3. Generate traffic (wait ~60 min for log propagation)
@@ -215,6 +236,23 @@ kubectl create secret generic airs-api-secret \
 #    Export Root CA from SCM, deploy to GKE:
 ./scripts/deploy-tls-decryption.sh ~/Downloads/airs-root-ca.pem
 #    See: docs/DEPLOYMENT_GUIDE.md section 8.13
+
+# 10. (Optional) AI Gateway Intercept – the third chatbot
+#     Independent of everything above: no firewall, no pan-cni, no TLS decrypt.
+#     The Prisma AIRS guardrail runs INSIDE the Portkey AI Gateway, so the app
+#     itself contains no scanning code at all.
+#
+#     First configure Portkey (UI only – the workspace key is data-plane and
+#     cannot create these objects): AIRS integration → guardrail → Vertex
+#     provider → config. Full walkthrough: docs/AI_GATEWAY_SETUP.md
+#
+#     🔴 Two traps that cost hours, both documented there:
+#        - Guardrail "Profile ID" silently OVERRIDES "Profile Name" → clear the ID
+#        - No config (pc-***) = requests routed with NO guardrail (silent fail-open)
+#
+# terraform.tfvars: portkey_api_key + portkey_config_id
+./scripts/deploy-gw-chatbot.sh
+kubectl port-forward -n ai-gw-chatbot svc/gw-chatbot 8082:80   # → http://127.0.0.1:8082
 ```
 
 ## Before the demo
@@ -276,6 +314,10 @@ kubectl patch svc api-chatbot -n ai-api-chatbot --type=merge -p "{\"spec\":{\"lo
 
 📖 **[Full deployment guide → docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)**
 
+🟣 **[AI Gateway Intercept setup → docs/AI_GATEWAY_SETUP.md](docs/AI_GATEWAY_SETUP.md)** —
+Portkey workspace, AIRS guardrail, Vertex provider, the `pc-***` config, the MCP
+server, and the indirect prompt-injection demo.
+
 ### Official Palo Alto Networks documentation
 
 | Topic | URL |
@@ -285,6 +327,7 @@ kubectl patch svc api-chatbot -n ai-api-chatbot --type=merge -p "{\"spec\":{\"lo
 | Deploy Network Intercept in GCP | https://docs.paloaltonetworks.com/ai-runtime-security/administration/deploy-ai-instances-in-public-clouds-as-a-software/add-ai-instance-for-gcp |
 | AIRS Python SDK | https://pan.dev/prisma-airs/api/airuntimesecurity/pythonsdk/ |
 | Strata Cloud Manager | https://stratacloudmanager.paloaltonetworks.com |
+| Portkey AI Gateway (AI Gateway Intercept) | https://portkey.ai/docs/ |
 
 ---
 

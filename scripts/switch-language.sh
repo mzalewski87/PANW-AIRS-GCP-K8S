@@ -1,13 +1,16 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  switch-language.sh – Bidirectional UI language switcher for both
+#  switch-language.sh – Bidirectional UI language switcher for all
 #                       AIRS demo chatbots running on GKE.
 #
 #  WHAT IT DOES:
-#  Sets the APP_LANG env var on the ai-chatbot and api-chatbot
-#  Deployments, then rolls a restart of both. Translation files
-#  (i18n/<lang>.json) are baked into the container images, so no
+#  Sets the APP_LANG env var on the ai-chatbot, api-chatbot and
+#  gw-chatbot Deployments, then rolls a restart of each. Translation
+#  files (i18n/<lang>.json) are baked into the container images, so no
 #  rebuild is required – just an env-var flip + rolling restart.
+#
+#  Deployments that are not present are skipped with a warning, so this
+#  works fine when only a subset of the three demos is deployed.
 #
 #  USAGE:
 #    ./scripts/switch-language.sh en      # English (default)
@@ -16,11 +19,13 @@
 #    ./scripts/switch-language.sh         # show current state
 #
 #  TO ADD A NEW LANGUAGE:
-#    1. cp kubernetes/app/i18n/en.json        kubernetes/app/i18n/<code>.json
+#    1. cp kubernetes/app/i18n/en.json         kubernetes/app/i18n/<code>.json
 #    2. cp kubernetes/api-chatbot/i18n/en.json kubernetes/api-chatbot/i18n/<code>.json
-#    3. Translate every value (keys MUST stay identical)
-#    4. Rebuild + push images: ./scripts/deploy-app.sh
-#    5. ./scripts/switch-language.sh <code>
+#    3. cp kubernetes/gw-chatbot/i18n/en.json  kubernetes/gw-chatbot/i18n/<code>.json
+#    4. Translate every value (keys MUST stay identical)
+#    5. Rebuild + push images: ./scripts/deploy-app.sh
+#                              ./scripts/deploy-gw-chatbot.sh
+#    6. ./scripts/switch-language.sh <code>
 #
 #  REQUIREMENTS:
 #  - kubectl context pointing at the GKE cluster
@@ -36,6 +41,8 @@ APP_NS="ai-chatbot"
 APP_DEPLOY="ai-chatbot"
 API_NS="ai-api-chatbot"
 API_DEPLOY="api-chatbot"
+GW_NS="ai-gw-chatbot"
+GW_DEPLOY="gw-chatbot"
 ENV_VAR="APP_LANG"
 ROLLOUT_TIMEOUT="180s"
 
@@ -82,6 +89,7 @@ command -v kubectl >/dev/null 2>&1 || die "kubectl is not installed"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_I18N_DIR="$REPO_ROOT/kubernetes/app/i18n"
 API_I18N_DIR="$REPO_ROOT/kubernetes/api-chatbot/i18n"
+GW_I18N_DIR="$REPO_ROOT/kubernetes/gw-chatbot/i18n"
 
 # ─────────────────────────────────────────
 # No argument → status
@@ -106,10 +114,17 @@ if [[ -z "$TARGET_LANG" ]]; then
   else
     echo "  api-chatbot (API Runtime):         ${C_YELLOW}deployment not found${C_RESET}"
   fi
+  if kubectl -n "$GW_NS" get deployment "$GW_DEPLOY" >/dev/null 2>&1; then
+    cur="$(current_lang "$GW_NS" "$GW_DEPLOY")"
+    echo "  gw-chatbot (AI Gateway):           ${C_BOLD}${cur:-<unset, default 'en'>}${C_RESET}"
+  else
+    echo "  gw-chatbot (AI Gateway):           ${C_YELLOW}deployment not found${C_RESET}"
+  fi
   echo ""
   echo "  Available translation files:"
   echo "    ai-chatbot/i18n/   : $(list_available_langs "$APP_I18N_DIR" | tr '\n' ' ')"
   echo "    api-chatbot/i18n/  : $(list_available_langs "$API_I18N_DIR" | tr '\n' ' ')"
+  echo "    gw-chatbot/i18n/   : $(list_available_langs "$GW_I18N_DIR" | tr '\n' ' ')"
   echo ""
   echo "  Switch with:  $0 <lang>     (e.g. en, pl)"
   echo ""
@@ -121,17 +136,16 @@ TARGET_LANG="$(echo "$TARGET_LANG" | tr '[:upper:]' '[:lower:]')"
 # ─────────────────────────────────────────
 # Validate translation files
 # ─────────────────────────────────────────
-APP_TRANSLATION="$APP_I18N_DIR/$TARGET_LANG.json"
-API_TRANSLATION="$API_I18N_DIR/$TARGET_LANG.json"
-
-if [[ ! -f "$APP_TRANSLATION" ]]; then
-  warn "Translation file missing locally: $APP_TRANSLATION"
-  warn "The app will fall back to English at runtime if the file is also missing in the image."
-fi
-if [[ ! -f "$API_TRANSLATION" ]]; then
-  warn "Translation file missing locally: $API_TRANSLATION"
-  warn "The app will fall back to English at runtime if the file is also missing in the image."
-fi
+for translation in \
+  "$APP_I18N_DIR/$TARGET_LANG.json" \
+  "$API_I18N_DIR/$TARGET_LANG.json" \
+  "$GW_I18N_DIR/$TARGET_LANG.json"
+do
+  if [[ ! -f "$translation" ]]; then
+    warn "Translation file missing locally: $translation"
+    warn "The app will fall back to English at runtime if the file is also missing in the image."
+  fi
+done
 
 # ─────────────────────────────────────────
 # Confirm + apply
@@ -164,10 +178,11 @@ switch_one() {
 
 switch_one "$APP_NS" "$APP_DEPLOY"
 switch_one "$API_NS" "$API_DEPLOY"
+switch_one "$GW_NS" "$GW_DEPLOY"
 
 if [[ ${#TOUCHED_DEPLOYMENTS[@]} -eq 0 ]]; then
   echo ""
-  ok "Nothing to do – both deployments already use APP_LANG=$TARGET_LANG."
+  ok "Nothing to do – every deployed chatbot already uses APP_LANG=$TARGET_LANG."
   exit 0
 fi
 
@@ -196,6 +211,7 @@ echo "${C_BOLD}╚════════════════════�
 echo ""
 echo "  ai-chatbot  (Network Intercept):  $(current_lang "$APP_NS" "$APP_DEPLOY")"
 echo "  api-chatbot (API Runtime):        $(current_lang "$API_NS" "$API_DEPLOY")"
+echo "  gw-chatbot  (AI Gateway):         $(current_lang "$GW_NS" "$GW_DEPLOY")"
 echo ""
 ok "Refresh the chatbot pages in your browser to see the new language."
 echo ""

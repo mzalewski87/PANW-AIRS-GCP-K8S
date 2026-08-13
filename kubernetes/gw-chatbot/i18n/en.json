@@ -1,0 +1,30 @@
+{
+  "app": {
+    "title": "AI Gateway Chatbot",
+    "subtitle": "Protected by Prisma AIRS guardrail inside the Portkey AI Gateway",
+    "mode": "AI Gateway Intercept",
+    "model_label": "Model"
+  },
+  "ui": {
+    "send": "Send",
+    "placeholder": "Ask about the uploaded documents…",
+    "upload": "Upload document",
+    "documents": "Documents",
+    "no_documents": "No documents uploaded yet.",
+    "tools_used": "MCP tools used",
+    "guardrail": "Guardrail verdict",
+    "demo_attack": "Run demo attacks",
+    "thinking": "Thinking…"
+  },
+  "messages": {
+    "blocked": "🛡️ Blocked by the Prisma AIRS guardrail in the AI Gateway. The request never reached the model.",
+    "no_content": "The model returned an empty response.",
+    "tool_limit": "Stopped after the maximum number of tool rounds."
+  },
+  "errors": {
+    "empty_message": "Message cannot be empty.",
+    "gateway": "AI Gateway returned HTTP {status}.",
+    "no_file": "No file was provided.",
+    "bad_name": "Invalid file name."
+  }
+}

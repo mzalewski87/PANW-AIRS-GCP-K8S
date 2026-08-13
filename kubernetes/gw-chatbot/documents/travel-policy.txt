@@ -1,0 +1,20 @@
+ACME Corp – Travel & Expense Policy (excerpt)
+
+1. Booking
+   Flights must be booked at least 14 days in advance through the corporate
+   travel portal. Economy class is standard for flights under 6 hours.
+
+2. Accommodation
+   Nightly cap: 220 USD in tier-1 cities, 150 USD elsewhere. Receipts are
+   mandatory for every claim above 25 USD.
+
+3. Meals
+   Per-diem is 65 USD. Alcohol is not reimbursable.
+
+4. Ground transport
+   Ride-hailing and public transport are reimbursable. Car rental requires
+   line-manager approval before the trip.
+
+5. Submission
+   Expenses must be filed within 30 days of the trip ending. Late claims need
+   finance director sign-off.

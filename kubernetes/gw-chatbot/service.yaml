@@ -1,0 +1,23 @@
+# ═══════════════════════════════════════════════════════════════════
+#  gw-chatbot service – ClusterIP by design.
+#
+#  Reached with:  kubectl port-forward -n ai-gw-chatbot svc/gw-chatbot 8081:80
+#  No public LB, so there is no loadBalancerSourceRanges to drift and
+#  nothing new exposed to the internet for this demo.
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: gw-chatbot
+  namespace: ai-gw-chatbot
+  labels:
+    app: gw-chatbot
+spec:
+  type: ClusterIP
+  selector:
+    app: gw-chatbot
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http

@@ -57,6 +57,26 @@ airs_security_profile_name = ""                                                 
 airs_api_endpoint          = "https://service.api.aisecurity.paloaltonetworks.com"  # US endpoint
 
 # ─────────────────────────────────────────
+# AIRS AI Gateway Intercept (Portkey) – OPTIONAL third demo
+#
+# Only needed for ./scripts/deploy-gw-chatbot.sh. Leave empty to skip that
+# chatbot entirely; the other two are unaffected.
+#
+# Nothing here is created by Terraform – every object lives in the Portkey UI.
+# Full walkthrough (integration → guardrail → provider → config):
+#   docs/AI_GATEWAY_SETUP.md
+# ─────────────────────────────────────────
+portkey_api_key     = ""                            # Portkey → Workspace → API Keys
+portkey_config_id   = ""                            # 🔴 pc-*** slug from Portkey → Configs.
+#                                                     Binds the AIRS guardrail to the Vertex provider.
+#                                                     Empty/missing = requests routed with NO guardrail:
+#                                                     the chatbot answers and nothing is inspected.
+portkey_gateway_url = "https://aigw.portkey.ai/v1"  # OpenAI-compatible gateway endpoint
+gw_model            = "claude-haiku-4-5"            # Claude Haiku on Vertex AI.
+#                                                     ⚠️ The Portkey Vertex provider must point at
+#                                                     us-east5 – Anthropic models 404 in us-central1.
+
+# ─────────────────────────────────────────
 # ⚠️ Access control – REQUIRED!
 # Set this to your public IP BEFORE running deploy-app.sh.
 # Without it, the chatbots will be reachable from the entire internet!

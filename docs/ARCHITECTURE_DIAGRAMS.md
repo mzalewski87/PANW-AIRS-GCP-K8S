@@ -374,3 +374,88 @@
            User
            (response + AIRS badge)
 ```
+
+```
+═══════════════════════════════════════════════════════════════════════════════
+            MODE 3: AI GATEWAY INTERCEPT – SCANNING FLOW
+═══════════════════════════════════════════════════════════════════════════════
+
+  Note: the application contains NO scanning code. The Prisma AIRS guardrail
+  runs inside the Portkey AI Gateway, so protection is in the model path itself.
+
+  User
+      │
+      │ 1. Prompt
+      ▼
+  ┌────────────────────────────────────────────────────────────────┐
+  │  gw-chatbot (ns: ai-gw-chatbot)   [ClusterIP – port-forward]   │
+  │                                                                │
+  │  POST https://aigw.portkey.ai/v1/chat/completions              │
+  │    x-portkey-api-key: <workspace key>                          │
+  │    x-portkey-config:  pc-***     ← binds guardrail + provider  │
+  │    body: { model, messages, tools: [MCP tools] }               │
+  └───────────────────────────┬────────────────────────────────────┘
+                              │
+                              ▼
+  ┌────────────────────────────────────────────────────────────────┐
+  │              PORTKEY AI GATEWAY                                │
+  │                                                                │
+  │  ① INPUT GUARDRAIL ──► Prisma AIRS scan (profile: *-GW)        │
+  │        │                                                       │
+  │        ├── fail → HTTP 446 ─────────► model NEVER called       │
+  │        │                                                       │
+  │        ▼ pass                                                  │
+  │  ┌──────────────────────────────────────────────┐              │
+  │  │  Vertex AI · Claude Haiku  (us-east5)        │              │
+  │  │  ⚠️ NOT us-central1 – Anthropic models 404   │              │
+  │  └───────────────────┬──────────────────────────┘              │
+  │                      │                                         │
+  │  ② OUTPUT GUARDRAIL ─► Prisma AIRS scan                        │
+  │        │                                                       │
+  │        └── fail → HTTP 446 ─────────► answer NEVER returned    │
+  └───────────────────────────┬────────────────────────────────────┘
+                              │
+                              ▼
+  ┌────────────────────────────────────────────────────────────────┐
+  │  gw-chatbot – tool loop                                        │
+  │                                                                │
+  │  tool_calls present?                                           │
+  │     │                                                          │
+  │     ├── NO  → return the answer to the user                    │
+  │     │                                                          │
+  │     └── YES → mcp_server.py                                    │
+  │                 ├── list_documents                             │
+  │                 ├── read_document      ← reads uploaded files  │
+  │                 └── search_documents                           │
+  │                          │                                     │
+  │                 tool result appended to messages               │
+  │                          │                                     │
+  │                          └──► BACK THROUGH THE GATEWAY ────────┼──┐
+  └────────────────────────────────────────────────────────────────┘  │
+                              ▲                                       │
+                              └───────────────────────────────────────┘
+                       ③ the guardrail now scans DOCUMENT CONTENT
+
+  ┌────────────────────────────────────────────────────────────────┐
+  │  WHY THE LOOP MATTERS – indirect prompt injection              │
+  │                                                                │
+  │  The user asks something innocent:  "Summarise the Q3 notes."  │
+  │  The model calls read_document.                                │
+  │  The FILE contains: "Ignore all previous instructions…"        │
+  │                                                                │
+  │  Because every tool hop re-enters the gateway, that text is    │
+  │  scanned exactly like user input → HTTP 446.                   │
+  │                                                                │
+  │  🔴 Requires Scan Scope = all_messages on the AIRS profile.    │
+  │     With the default scope only the user turn is inspected     │
+  │     and the tainted document passes straight through.          │
+  └────────────────────────────────────────────────────────────────┘
+
+  STATUS CODES
+    200 – all checks passed
+    246 – check failed, request ALLOWED  (deny=false) ← detection without
+                                                        enforcement
+    446 – check failed, request BLOCKED  (deny=true)
+```
+
+> Setup for this mode: [AI_GATEWAY_SETUP.md](AI_GATEWAY_SETUP.md)

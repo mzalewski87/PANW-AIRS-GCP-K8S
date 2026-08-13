@@ -133,6 +133,56 @@ variable "airs_api_endpoint" {
 }
 
 # ─────────────────────────────────────────
+# AIRS AI Gateway Intercept (Portkey)
+#
+# These four are NOT consumed by any Terraform resource – the gateway lives
+# outside GCP and every object it needs (integration, guardrail, provider,
+# config) is created in the Portkey UI. They are declared here so that
+# terraform.tfvars stays the single place for demo configuration, and so
+# Terraform does not reject them as undeclared variables.
+# scripts/deploy-gw-chatbot.sh reads them straight out of terraform.tfvars.
+#
+# Setup walkthrough: docs/AI_GATEWAY_SETUP.md
+# ─────────────────────────────────────────
+variable "portkey_api_key" {
+  description = <<-EOT
+    Portkey workspace API key for the AI Gateway chatbot.
+    Portkey → Workspace → API Keys. This is a data-plane key: it works against
+    the gateway host (aigw.portkey.ai) but not the control-plane API.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# 🔴 The config is what BINDS the AIRS guardrail to the model provider.
+# A Portkey guardrail on its own is inert, and a request sent with no config
+# is happily routed to the model with NO inspection at all. Same fail-open
+# shape as a wrong AIRS profile name: the chatbot answers, nothing is scanned.
+# deploy-gw-chatbot.sh aborts when this is empty rather than deploying a demo
+# that proves nothing.
+variable "portkey_config_id" {
+  description = "Portkey config slug (pc-***) binding the AIRS guardrail to the Vertex AI provider. Required for AI Gateway Intercept – see docs/AI_GATEWAY_SETUP.md § 6."
+  type        = string
+  default     = ""
+}
+
+variable "portkey_gateway_url" {
+  description = "Portkey AI Gateway base URL (OpenAI-compatible endpoint)"
+  type        = string
+  default     = "https://aigw.portkey.ai/v1"
+}
+
+# Claude on Vertex AI is only served from a subset of regions – us-east5 for
+# the Anthropic models, NOT us-central1 (which 404s). The region is configured
+# on the Portkey provider, not here; this is only the model name the app asks for.
+variable "gw_model" {
+  description = "Model name requested through the AI Gateway (Claude Haiku on Vertex AI)"
+  type        = string
+  default     = "claude-haiku-4-5"
+}
+
+# ─────────────────────────────────────────
 # Access control – IP ACL for chatbots
 # ─────────────────────────────────────────
 variable "allowed_mgmt_cidrs" {

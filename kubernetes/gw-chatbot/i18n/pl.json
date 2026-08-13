@@ -1,0 +1,30 @@
+{
+  "app": {
+    "title": "Chatbot AI Gateway",
+    "subtitle": "Chroniony przez guardrail Prisma AIRS w bramie Portkey AI Gateway",
+    "mode": "AI Gateway Intercept",
+    "model_label": "Model"
+  },
+  "ui": {
+    "send": "Wyślij",
+    "placeholder": "Zapytaj o wgrane dokumenty…",
+    "upload": "Wgraj dokument",
+    "documents": "Dokumenty",
+    "no_documents": "Nie wgrano jeszcze żadnych dokumentów.",
+    "tools_used": "Użyte narzędzia MCP",
+    "guardrail": "Werdykt guardraila",
+    "demo_attack": "Uruchom ataki demo",
+    "thinking": "Myślę…"
+  },
+  "messages": {
+    "blocked": "🛡️ Zablokowane przez guardrail Prisma AIRS w AI Gateway. Żądanie nie dotarło do modelu.",
+    "no_content": "Model zwrócił pustą odpowiedź.",
+    "tool_limit": "Zatrzymano po maksymalnej liczbie rund narzędziowych."
+  },
+  "errors": {
+    "empty_message": "Wiadomość nie może być pusta.",
+    "gateway": "AI Gateway zwrócił HTTP {status}.",
+    "no_file": "Nie przekazano pliku.",
+    "bad_name": "Nieprawidłowa nazwa pliku."
+  }
+}

@@ -1,0 +1,105 @@
+# ═══════════════════════════════════════════════════════════════════
+#  gw-chatbot – AI Gateway Intercept (Prisma AIRS guardrail in Portkey)
+#
+#  Third protection mode in this repo. Deliberately isolated from the
+#  other two so it cannot disturb them:
+#    - own namespace  ai-gw-chatbot
+#    - NO paloaltonetworks.com/firewall annotation (no CNI chaining)
+#    - NO airs-cni nodeSelector – schedules on any pool
+#    - plain httpGet probes: without the XDP tunnel they work fine here
+#
+#  Egress goes to the public Portkey gateway, so this pod does traverse
+#  the VM-Series like any other App VPC egress, but it is not intercepted
+#  at the pod level.
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-gw-chatbot
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gw-chatbot
+  namespace: ai-gw-chatbot
+  labels:
+    app: gw-chatbot
+    airs-mode: ai-gateway-intercept
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gw-chatbot
+  template:
+    metadata:
+      labels:
+        app: gw-chatbot
+        airs-mode: ai-gateway-intercept
+    spec:
+      containers:
+        - name: gw-chatbot
+          image: REGISTRY_PLACEHOLDER/gw-chatbot:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: APP_LANG
+              value: "en"
+            - name: PORTKEY_GATEWAY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: gw-chatbot-env
+                  key: PORTKEY_GATEWAY_URL
+            - name: PORTKEY_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: gw-chatbot-env
+                  key: PORTKEY_CONFIG
+            - name: GW_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: gw-chatbot-env
+                  key: GW_MODEL
+            - name: PORTKEY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: portkey-api-secret
+                  key: api-key
+            - name: DOCUMENTS_DIR
+              value: "/app/documents"
+          volumeMounts:
+            - name: documents
+              mountPath: /app/documents
+          # The emptyDir would mask the seed documents baked into the image,
+          # leaving the demo with an empty corpus. Copy them in on start.
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - cp -n /app/seed-documents/* /app/documents/ 2>/dev/null || true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        # emptyDir: uploads are demo scratch data and should reset with the pod.
+        - name: documents
+          emptyDir: {}

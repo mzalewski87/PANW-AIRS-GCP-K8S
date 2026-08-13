@@ -4,7 +4,7 @@
 #  Run when you want to wipe the environment after webinar/demo
 #
 #  WARNING: This is a DESTRUCTIVE operation! Removes:
-#  - Kubernetes applications (both chatbots)
+#  - Kubernetes applications (all three chatbots)
 #  - Terraform infrastructure (VPC, GKE, VM-Series prereqs)
 #  - Docker images in Artifact Registry
 # ═══════════════════════════════════════════════════════════════════
@@ -57,6 +57,9 @@ if gcloud container clusters get-credentials "$CLUSTER_NAME" \
   echo "  Removing namespace ai-api-chatbot..."
   kubectl delete namespace ai-api-chatbot --ignore-not-found --timeout=60s 2>/dev/null || true
 
+  echo "  Removing namespace ai-gw-chatbot..."
+  kubectl delete namespace ai-gw-chatbot --ignore-not-found --timeout=60s 2>/dev/null || true
+
   echo "  Removing PAN-CNI DaemonSet..."
   kubectl delete -f kubernetes/cni/pan-cni-daemonset.yaml --ignore-not-found 2>/dev/null || true
 
@@ -75,7 +78,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 REGISTRY_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/airs-ai-chatbot"
 
-for IMAGE in chatbot api-chatbot; do
+for IMAGE in chatbot api-chatbot gw-chatbot; do
   echo "  Removing ${REGISTRY_URL}/${IMAGE}..."
   gcloud artifacts docker images delete "${REGISTRY_URL}/${IMAGE}" \
     --delete-tags --quiet 2>/dev/null || echo "  ⚠️  Image ${IMAGE} not found"

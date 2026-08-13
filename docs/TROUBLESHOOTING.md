@@ -25,6 +25,10 @@
 18. [External LB timeout from internet, only health-checks visible in SCM Logs](#18-external-lb-untrust-elb-timeout-from-internet-only-health-checks-visible-in-scm-logs)
 19. [Both apps time out from your browser, nothing wrong in the cluster](#19-both-apps-time-out-from-your-browser-nothing-wrong-in-the-cluster)
 20. [`deploy-app.sh` aborts: no node carries airs-cni=enabled](#20-deploy-appsh-aborts-no-node-carries-airs-cnienabled)
+21. [AI Gateway: everything is blocked, even "hello"](#21-ai-gateway-everything-is-blocked-even-hello)
+22. [AI Gateway: fixed the profile in SCM, the gateway still blocks](#22-ai-gateway-fixed-the-profile-in-scm-the-gateway-still-blocks)
+23. [AI Gateway: attacks return 200 — nothing is being inspected](#23-ai-gateway-attacks-return-200--nothing-is-being-inspected)
+24. [AI Gateway: gw-chatbot document list is empty (`count: 0`)](#24-ai-gateway-gw-chatbot-document-list-is-empty-count-0)
 
 ---
 
@@ -1049,9 +1053,154 @@ purpose without pan-cni.
 
 ---
 
+## 21. AI Gateway: everything is blocked, even "hello"
+
+**Symptom:** every prompt through `gw-chatbot` returns HTTP 446 — including
+`hello`, and even a single character. The guardrail data shows:
+
+```
+topic_violation: True
+```
+
+**Cause:** **Topic Guardrails** on the AIRS security profile are scoped too
+broadly. An allowed-topics list that doesn't match the demo content rejects
+everything that isn't on it, and a greeting is on nobody's list.
+
+This looks exactly like a broken gateway or a bad API key, so it eats a lot of
+debugging time. Check it **first** when the block rate is 100%.
+
+**Fix:** SCM → AI Runtime Security → API Security → Profiles → your profile →
+turn Topic Guardrails off, or scope them to match the demo corpus.
+
+Confirm the profile itself is sane before blaming the gateway:
+
+```bash
+# Same profile, straight to the AIRS API – bypasses Portkey entirely.
+# If this blocks "hello" too, the problem is the profile, not the gateway.
+./scripts/verify-airs-profile.sh
+```
+
+---
+
+## 22. AI Gateway: fixed the profile in SCM, the gateway still blocks
+
+**Symptom:** you corrected the security profile in SCM (e.g. disabled Topic
+Guardrails per § 21), the AIRS API now allows the prompt — but the **gateway**
+still returns 446 for the same text.
+
+**Cause:** the Portkey guardrail has **both** `Profile Name` and `Profile ID`
+filled in. When both are supplied, **AIRS resolves by `profile_id` and ignores
+the name entirely**. The UUID pins a *pre-fix* version of the profile, so every
+correction you make in the UI is invisible to the gateway.
+
+Isolating it — same request, three variants:
+
+| Guardrail fields | Result |
+|---|---|
+| `profile_name` only | ✅ allow |
+| `profile_id` only | ❌ block |
+| both | ❌ block ← **the ID wins** |
+
+**Fix:** Portkey → Guardrails → your AIRS guardrail → **clear the Profile ID
+field**, keep Profile Name. Save. The next request picks up the current profile.
+
+> The same rule applies to the Python SDK: pass `AiProfile(profile_name=...)`
+> **or** `AiProfile(profile_id=...)`, never both.
+
+---
+
+## 23. AI Gateway: attacks return 200 — nothing is being inspected
+
+**Symptom:** the chatbot works, answers well, and the prompt-injection demo
+returns a cheerful HTTP 200 instead of 446. Nothing is blocked.
+
+This is the AI Gateway equivalent of a wrong AIRS profile name in API Runtime
+mode: a **silent fail-open**. On stage it looks like the product doesn't work.
+
+**Diagnose:**
+
+```bash
+kubectl port-forward -n ai-gw-chatbot svc/gw-chatbot 8082:80 &
+curl -s localhost:8082/api/gateway-status | python3 -m json.tool
+```
+
+| Field | Meaning |
+|---|---|
+| `guardrail_attached: false` | ← the problem: no guardrail in the request path |
+| `config: null` | No `pc-***` config was sent at all |
+| `http_status: 401` | Wrong Portkey key, or hitting `api.portkey.ai` instead of `aigw.portkey.ai` |
+| `http_status: 404` | Vertex provider in the wrong region — Claude needs **us-east5** |
+
+**Causes, in order of likelihood:**
+
+1. **No config, or a config without guardrails.** A Portkey guardrail is inert
+   until a config references it. Check that your `pc-***` config actually has
+   `input_guardrails` and `output_guardrails` populated with the `pg--...` ID.
+2. **Wrong config in the ConfigMap:**
+   ```bash
+   kubectl get configmap gw-chatbot-env -n ai-gw-chatbot -o jsonpath='{.data.PORTKEY_CONFIG}'; echo
+   ```
+3. **Guardrail action is "allow", not "deny".** Then failed checks return
+   **246** ("checked, failed, allowed through") instead of 446. Detection
+   works, enforcement doesn't — the sneakiest variant, since the guardrail data
+   in the response looks correct.
+
+**Status code reference:**
+
+| Code | Meaning |
+|---|---|
+| 200 | All checks passed |
+| 246 | A check failed, request **allowed** (`deny=false`) |
+| 446 | A check failed, request **blocked** (`deny=true`) |
+
+**Fix:** see [AI_GATEWAY_SETUP.md § 6](AI_GATEWAY_SETUP.md#6-portkey-the-config-pc--the-piece-that-ties-it-together).
+Then redeploy: `./scripts/deploy-gw-chatbot.sh` (it aborts on an empty or
+non-`pc-` config precisely to prevent this state).
+
+---
+
+## 24. AI Gateway: gw-chatbot document list is empty (`count: 0`)
+
+**Symptom:** `GET /api/documents` returns `{"count": 0, "documents": []}`. The
+MCP tools find nothing, and the indirect-injection demo has no bait to read.
+
+**Cause:** `deployment.yaml` mounts an `emptyDir` at `/app/documents`, which
+**masks** the seed corpus baked into the image at that same path. The mount wins;
+the files are still in the image but unreachable.
+
+**Fix (already in the repo):** the Dockerfile copies the corpus to
+`/app/seed-documents`, and a `postStart` hook copies it back into the volume:
+
+```yaml
+lifecycle:
+  postStart:
+    exec:
+      command: ["/bin/sh", "-c", "cp -n /app/seed-documents/* /app/documents/ 2>/dev/null || true"]
+```
+
+`cp -n` (no-clobber) means re-running it never overwrites files the user
+uploaded during the demo.
+
+**If the count is still 0**, the hook didn't run:
+
+```bash
+kubectl describe pod -n ai-gw-chatbot -l app=gw-chatbot | grep -A5 -i "postStart\|Events"
+# Look for FailedPostStartHook
+
+# Is the seed corpus in the image at all?
+POD=$(kubectl get pod -n ai-gw-chatbot -l app=gw-chatbot -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n ai-gw-chatbot "$POD" -- ls -la /app/seed-documents /app/documents
+```
+
+An empty `/app/seed-documents` means the image predates the fix — rebuild with
+`./scripts/deploy-gw-chatbot.sh`.
+
+---
+
 ## Reference links
 
 - [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) – full deployment guide
+- [AI_GATEWAY_SETUP.md](AI_GATEWAY_SETUP.md) – AI Gateway Intercept (Portkey + AIRS guardrail)
 - [SCM_CONFIGURATION_REQUIRED.md](SCM_CONFIGURATION_REQUIRED.md) – post-deployment SCM configuration
 - [ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md) – diagrams
 - PAN docs: https://docs.paloaltonetworks.com/ai-runtime-security
