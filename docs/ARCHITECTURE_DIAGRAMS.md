@@ -345,7 +345,7 @@
   │               │ NO (allow)                                     │
   │               ▼                                                │
   │  3. ┌────────────────────┐                                     │
-  │     │  Call Gemini API   │────► generativelanguage.googleapis  │
+  │     │  Call Gemini       │────► <region>-aiplatform.googleapis │
   │     │  (REST + OAuth)    │◄──── AI Response                    │
   │     └────────┬───────────┘                                     │
   │              │                                                 │

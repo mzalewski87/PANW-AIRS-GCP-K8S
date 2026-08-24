@@ -31,7 +31,7 @@ metadata:
   namespace: ai-api-chatbot
 data:
   GCP_LOCATION: "us-central1"
-  VERTEX_AI_MODEL: "gemini-flash-latest"
+  VERTEX_AI_MODEL: "gemini-2.5-flash"
   AIRS_API_ENDPOINT: "__AIRS_ENDPOINT__"
   AIRS_SECURITY_PROFILE_NAME: "__AIRS_PROFILE__"
 ---

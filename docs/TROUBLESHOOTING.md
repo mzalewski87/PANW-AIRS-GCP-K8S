@@ -29,6 +29,7 @@
 22. [AI Gateway: fixed the profile in SCM, the gateway still blocks](#22-ai-gateway-fixed-the-profile-in-scm-the-gateway-still-blocks)
 23. [AI Gateway: attacks return 200 — nothing is being inspected](#23-ai-gateway-attacks-return-200--nothing-is-being-inspected)
 24. [AI Gateway: gw-chatbot document list is empty (`count: 0`)](#24-ai-gateway-gw-chatbot-document-list-is-empty-count-0)
+25. [Both chatbots suddenly return 403 — `ACCESS_TOKEN_SCOPE_INSUFFICIENT`](#25-both-chatbots-suddenly-return-403--access_token_scope_insufficient)
 
 ---
 
@@ -260,7 +261,7 @@ specific path `/php/login.php`.
 
 ### Symptoms
 ```bash
-kubectl exec -n ai-chatbot <pod> -- curl -m 5 https://generativelanguage.googleapis.com
+kubectl exec -n ai-chatbot <pod> -- curl -m 5 https://us-central1-aiplatform.googleapis.com
 # → timeout
 ```
 
@@ -277,7 +278,7 @@ If the **ILB is UNHEALTHY** or **the firewalls are not configured**, the traffic
    - SCM config: zones, interfaces, loopbacks, LR, NAT, security policy
    - Push Config in SCM
 3. Verify: `gcloud compute backend-services get-health <PREFIX>-internal-lb --region=$REGION` – all HEALTHY
-4. Test: `kubectl exec -n ai-chatbot <pod> -- curl -I https://generativelanguage.googleapis.com` should return HTTP 404 (or 405) quickly
+4. Test: `kubectl exec -n ai-chatbot <pod> -- curl -I https://us-central1-aiplatform.googleapis.com` should return HTTP 404 (or 405) quickly
 
 ---
 
@@ -301,7 +302,7 @@ This is the same symptom as [problem #5](#5-pods-have-no-internet-egress-timeout
 **Quick test without the application:**
 ```bash
 POD=$(kubectl get pod -n ai-chatbot -l app=ai-chatbot -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n ai-chatbot "$POD" -- timeout 5 curl -sko /dev/null -w "%{http_code}\n" -I https://generativelanguage.googleapis.com
+kubectl exec -n ai-chatbot "$POD" -- timeout 5 curl -sko /dev/null -w "%{http_code}\n" -I https://us-central1-aiplatform.googleapis.com
 # Working firewall → HTTP 404 or 405
 # No egress → timeout / no response
 ```
@@ -1194,6 +1195,122 @@ kubectl exec -n ai-gw-chatbot "$POD" -- ls -la /app/seed-documents /app/document
 
 An empty `/app/seed-documents` means the image predates the fix — rebuild with
 `./scripts/deploy-gw-chatbot.sh`.
+
+---
+
+## 25. Both chatbots suddenly return 403 — `ACCESS_TOKEN_SCOPE_INSUFFICIENT`
+
+**Symptom.** The web UI loads fine, but sending any message returns an error.
+`ai-chatbot` replies with HTTP 500 and `"HTTP Error 403: Forbidden"`;
+`api-chatbot` replies with HTTP 200 and the error embedded in the answer text
+(its `call_gemini` catches exceptions and returns them as a string), with the
+AIRS scans reporting perfectly healthy. **The pods have not been restarted and
+nothing in the repo changed** — this appears on its own.
+
+The third chatbot (`gw-chatbot`) is unaffected: it reaches the model through
+Portkey, not through a Google endpoint.
+
+**Diagnosis.** Ask the API directly from inside a pod:
+
+```bash
+POD=$(kubectl get pods -n ai-chatbot -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n ai-chatbot "$POD" -- sh -c '
+TOKEN=$(curl -s -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+  | sed -E "s/.*\"access_token\":\"([^\"]*)\".*/\1/")
+curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$TOKEN"'
+```
+
+The token comes back with a healthy identity but only these scopes:
+
+```
+"email": "airs-ai-app-sa@<project>.iam.gserviceaccount.com",
+"scope": "email userinfo.email https://www.googleapis.com/auth/cloud-platform"
+```
+
+and the model call fails with:
+
+```json
+{ "code": 403, "status": "PERMISSION_DENIED",
+  "reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+  "metadata": { "service": "generativelanguage.googleapis.com" } }
+```
+
+**Cause.** `generativelanguage.googleapis.com` (the "Gemini API") requires the
+`auth/generative-language` OAuth scope. A GKE node pool mints tokens only for
+the scopes it was created with — here `cloud-platform` — and **node pool scopes
+are immutable**: changing them means recreating the pool. The apps asked for the
+extra scope, but the metadata server never issued it. Google used to accept
+`cloud-platform` alone on this endpoint and stopped, which is why a running
+deployment breaks with no local change.
+
+**This is not an IAM problem.** `roles/aiplatform.user` is bound correctly.
+OAuth scopes and IAM roles are separate layers — granting more roles changes
+nothing here.
+
+**Fix — use Vertex AI instead.** Vertex serves the same Gemini models and
+accepts `cloud-platform`:
+
+```
+https://us-central1-aiplatform.googleapis.com/v1beta/models/{MODEL}:generateContent
+→ https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/google/models/{MODEL}:generateContent
+```
+
+Both apps do this as of the Vertex AI migration. If you are on an older image,
+rebuild.
+
+> ### ⚠️ On a cluster that already has TLS decryption, do not re-run `deploy-app.sh`
+> It reapplies the deployment manifests, which drops the Root CA mount added by
+> `deploy-tls-decryption.sh` — ai-chatbot then fails TLS verification against the
+> firewall's forged certificate. Either re-run
+> `./scripts/deploy-tls-decryption.sh <root-ca.pem>` afterwards, or ship just the
+> new code and leave the live manifests alone:
+>
+> ```bash
+> REG=<region>-docker.pkg.dev/<project>/airs-ai-chatbot
+> gcloud builds submit kubernetes/app/         --tag "$REG/chatbot:latest"     --region <region> --quiet
+> gcloud builds submit kubernetes/api-chatbot/ --tag "$REG/api-chatbot:latest" --region <region> --quiet
+>
+> # The model name lives in a ConfigMap, not in the image:
+> kubectl patch cm ai-chatbot-config  -n ai-chatbot     --type merge -p '{"data":{"VERTEX_AI_MODEL":"gemini-2.5-flash"}}'
+> kubectl patch cm api-chatbot-config -n ai-api-chatbot --type merge -p '{"data":{"VERTEX_AI_MODEL":"gemini-2.5-flash"}}'
+>
+> kubectl rollout restart deployment/ai-chatbot  -n ai-chatbot
+> kubectl rollout restart deployment/api-chatbot -n ai-api-chatbot
+> ```
+>
+> Note `api-chatbot` reads **`api-chatbot-config`**, not `api-chatbot-env` — both
+> ConfigMaps exist in that namespace and only the former is wired into the
+> deployment via `envFrom`. Confirm what the app actually resolved with
+> `curl /api/chat` and check the `model` field in the reply.
+
+Three details that matter when porting the call:
+
+| Detail | Gemini API | Vertex AI |
+| ------ | ---------- | --------- |
+| Model name | `gemini-flash-latest` works | **404** – moving aliases do not exist; pin `gemini-2.5-flash` |
+| `x-goog-user-project` header | required | not needed – the project is in the URL |
+| `contents[].role` | optional | send `"role": "user"` |
+
+The response shape is identical (`candidates[0].content.parts[0].text`), so
+response parsing needs no change. Thinking models can add a part flagged
+`"thought": true`; both apps now skip those and concatenate only real text
+parts.
+
+> ### ✅ The firewall demo is unaffected
+> Verify that Network Intercept still sees the traffic — the TLS issuer from
+> inside the pod should be the firewall's CA, not Google's:
+>
+> ```bash
+> kubectl exec -n ai-chatbot "$POD" -- sh -c \
+>   'echo | openssl s_client -connect us-central1-aiplatform.googleapis.com:443 \
+>    -servername us-central1-aiplatform.googleapis.com 2>/dev/null | openssl x509 -noout -issuer'
+> # issuer=CN=... Forward Trust CA ECDSA   ← decrypted by the VM-Series
+> ```
+>
+> If it returns a Google issuer instead, the decryption rule does not cover the
+> new FQDN — check the SCM decryption policy and any FQDN-based security rules
+> that still name `generativelanguage.googleapis.com`.
 
 ---
 

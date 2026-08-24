@@ -39,6 +39,10 @@ resource "google_project_service" "apis" {
     "dns.googleapis.com",
     "storage.googleapis.com",
     "cloudbuild.googleapis.com",
+    # No longer used by the chatbots – they call Gemini through Vertex AI
+    # (aiplatform.googleapis.com), because generativelanguage rejects Workload
+    # Identity tokens. Kept enabled so existing deployments do not see a state
+    # change; safe to drop on a fresh install. See docs/TROUBLESHOOTING.md § 25.
     "generativelanguage.googleapis.com",
   ])
 

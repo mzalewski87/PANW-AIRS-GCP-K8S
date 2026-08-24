@@ -67,38 +67,55 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 # Configuration via env vars
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
 VERTEX_AI_LOCATION = os.getenv("VERTEX_AI_LOCATION", "us-central1")
-VERTEX_AI_MODEL = os.getenv("VERTEX_AI_MODEL", "gemini-flash-latest")
+VERTEX_AI_MODEL = os.getenv("VERTEX_AI_MODEL", "gemini-2.5-flash")
 APP_PORT = int(os.getenv("APP_PORT", "8080"))
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", T["system"]["default_system_prompt"])
 
 
 def call_gemini(prompt: str, history: list = None) -> str:
-    """Calls the Gemini API (generativelanguage.googleapis.com) with Workload Identity."""
+    """Calls Gemini on Vertex AI (<region>-aiplatform.googleapis.com) with Workload Identity.
+
+    NOT generativelanguage.googleapis.com. That endpoint rejects Workload Identity
+    tokens with 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT: it wants the
+    auth/generative-language scope, which a GKE node pool cannot mint (node pools
+    carry cloud-platform, and scopes are fixed at pool creation). Vertex AI serves
+    the same models and accepts cloud-platform, so this is the endpoint that works
+    from inside the cluster. See docs/TROUBLESHOOTING.md § 25.
+    """
     import urllib.request as urlreq
     try:
         credentials, _ = google.auth.default(scopes=[
             'https://www.googleapis.com/auth/cloud-platform',
-            'https://www.googleapis.com/auth/generative-language',
         ])
         auth_req_obj = google.auth.transport.requests.Request()
         credentials.refresh(auth_req_obj)
 
         logger.info(f"{T['system']['log_sending_prompt']} [{VERTEX_AI_MODEL}]: {prompt[:100]}...")
 
-        url = f'https://generativelanguage.googleapis.com/v1beta/models/{VERTEX_AI_MODEL}:generateContent'
+        url = (
+            f'https://{VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1'
+            f'/projects/{GCP_PROJECT_ID}/locations/{VERTEX_AI_LOCATION}'
+            f'/publishers/google/models/{VERTEX_AI_MODEL}:generateContent'
+        )
         payload = json.dumps({
-            'contents': [{'parts': [{'text': prompt}]}]
+            'contents': [{'role': 'user', 'parts': [{'text': prompt}]}]
         }).encode()
 
         req = urlreq.Request(url, data=payload, headers={
             'Authorization': f'Bearer {credentials.token}',
             'Content-Type': 'application/json',
-            'x-goog-user-project': GCP_PROJECT_ID,
         })
 
         resp = urlreq.urlopen(req, timeout=30)
         result = json.loads(resp.read())
-        answer = result['candidates'][0]['content']['parts'][0]['text']
+
+        # Thinking models can emit reasoning parts alongside the answer. Those are
+        # flagged with "thought": true and must be skipped, otherwise the user would
+        # see the model's scratchpad instead of its reply.
+        parts = result['candidates'][0]['content'].get('parts', [])
+        answer = ''.join(
+            p['text'] for p in parts if 'text' in p and not p.get('thought')
+        )
 
         logger.info(f"{T['system']['log_response']}: {answer[:100]}...")
         return answer

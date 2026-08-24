@@ -8,6 +8,18 @@
 #  Deploys:
 #  1. ai-chatbot (namespace ai-chatbot) – Network Intercept demo
 #  2. api-chatbot (namespace ai-api-chatbot) – API Runtime Intercept demo
+#
+#  ⚠️ This REAPPLIES the deployment manifests, which drops any patch applied
+#     on top of them afterwards. On an environment that already has TLS
+#     decryption set up, re-run deploy-tls-decryption.sh after this script,
+#     or the ai-chatbot pods lose the Root CA mount and every model call
+#     fails TLS verification against the firewall's forged certificate:
+#
+#       ./scripts/deploy-tls-decryption.sh <root-ca.pem>
+#
+#     To ship only new application code onto a configured cluster, skip this
+#     script: build the images and restart the deployments instead, which
+#     leaves the live manifests untouched.
 # ═══════════════════════════════════════════════════════════════════
 
 set -euo pipefail

@@ -58,7 +58,7 @@ metadata:
   namespace: ai-chatbot
 data:
   VERTEX_AI_LOCATION: "us-central1"
-  VERTEX_AI_MODEL: "gemini-flash-latest"
+  VERTEX_AI_MODEL: "gemini-2.5-flash"
   APP_PORT: "8080"
   APP_ENV: "demo"
   LOG_LEVEL: "INFO"

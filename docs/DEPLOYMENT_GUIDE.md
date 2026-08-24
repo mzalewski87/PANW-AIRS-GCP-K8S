@@ -1133,8 +1133,8 @@ After the push, check the health checks in Google Cloud:
 
 > ⚠️ **WITHOUT TLS DECRYPTION AIRS does not see the contents of prompts or AI responses!**
 >
-> The applications talk to Gemini API over HTTPS. Without TLS decryption the firewall sees
-> only the SNI (the hostname `generativelanguage.googleapis.com`), but does NOT see the contents —
+> The applications talk to Gemini on Vertex AI over HTTPS. Without TLS decryption the firewall sees
+> only the SNI (the hostname `us-central1-aiplatform.googleapis.com`), but does NOT see the contents —
 > prompts, responses, PII, prompt injection attempts. All AI Security Profile protection
 > (prompt injection, PII/DLP, jailbreak, toxic content detection) requires visibility into the body.
 
@@ -2007,20 +2007,34 @@ gcloud compute instances get-serial-port-output <vm-series-name> \
 | certificate.paloaltonetworks.com | TCP 443 | Device certificate download |
 | *.gpcloudservice.com | TCP 443, 444 | SCM registration |
 
-### 13.2 Gemini API 404
+### 13.2 Vertex AI 404 / 403
 
-The chatbot returns "Model not found":
-- Check whether the `generativelanguage.googleapis.com` API is enabled
-- The repo defaults to the **rolling alias** `gemini-flash-latest`, which Google keeps
-  pointing at the current Flash model — a pinned version such as `gemini-2.5-flash`
-  eventually 404s when it is retired. If you pinned one, move back to the alias:
+Both chatbots call Gemini through **Vertex AI**
+(`<region>-aiplatform.googleapis.com`), not through the Gemini API. That choice
+is forced, not stylistic — see [TROUBLESHOOTING § 25](TROUBLESHOOTING.md#25-both-chatbots-suddenly-return-403--access_token_scope_insufficient).
+
+**404 "Model not found":**
+- Vertex requires an **explicit model version**. The moving aliases
+  (`gemini-flash-latest`, `gemini-pro-latest`) exist only on the Gemini API and
+  404 on Vertex. Use a pinned ID and bump it when the model retires:
   ```bash
-  kubectl set env deployment/ai-chatbot   -n ai-chatbot     VERTEX_AI_MODEL=gemini-flash-latest
-  kubectl set env deployment/api-chatbot  -n ai-api-chatbot VERTEX_AI_MODEL=gemini-flash-latest
-  # List what your project can actually call:
-  gcloud services list --enabled --filter=generativelanguage --project=$PROJECT_ID
+  kubectl set env deployment/ai-chatbot   -n ai-chatbot     VERTEX_AI_MODEL=gemini-2.5-flash
+  kubectl set env deployment/api-chatbot  -n ai-api-chatbot VERTEX_AI_MODEL=gemini-2.5-flash
+  # List what your project can actually call in this region:
+  gcloud ai models list --region=$REGION --project=$PROJECT_ID 2>/dev/null | head
   ```
-- Workload Identity: KSA must point to `airs-ai-app-sa`
+- Check the region: the model must be served in `VERTEX_AI_LOCATION` /
+  `GCP_LOCATION`. The URL embeds the region twice (host and path) and a
+  region that does not serve the model 404s.
+
+**403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`:** the app is still calling
+`generativelanguage.googleapis.com` — an image built before the Vertex AI
+migration. Rebuild with `./scripts/deploy-app.sh`.
+
+**Other checks:**
+- `aiplatform.googleapis.com` API enabled
+- Workload Identity: KSA must point to `airs-ai-app-sa`, which needs
+  `roles/aiplatform.user`
 
 ### 13.3 AIRS SDK does not scan
 

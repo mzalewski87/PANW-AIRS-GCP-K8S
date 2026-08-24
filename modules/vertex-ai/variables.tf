@@ -16,7 +16,7 @@ variable "endpoint_name" {
 variable "model_id" {
   description = "Vertex AI model ID (Gemini)"
   type        = string
-  default     = "gemini-flash-latest"
+  default     = "gemini-2.5-flash"
 }
 
 variable "gke_sa_email" {

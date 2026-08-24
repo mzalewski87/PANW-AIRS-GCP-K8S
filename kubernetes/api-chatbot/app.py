@@ -71,7 +71,7 @@ app = Flask(__name__)
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
 LOCATION   = os.environ.get("GCP_LOCATION", "us-central1")
-MODEL_ID   = os.environ.get("VERTEX_AI_MODEL", "gemini-flash-latest")
+MODEL_ID   = os.environ.get("VERTEX_AI_MODEL", "gemini-2.5-flash")
 
 # AIRS configuration
 AIRS_API_KEY             = os.environ.get("AIRS_API_KEY", "")
@@ -103,14 +103,19 @@ else:
 
 
 # ─────────────────────────────────────────
-# Gemini API Client (generativelanguage.googleapis.com)
+# Gemini on Vertex AI (<region>-aiplatform.googleapis.com)
+#
+# NOT generativelanguage.googleapis.com. That endpoint rejects Workload Identity
+# tokens with 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT: it wants the
+# auth/generative-language scope, which a GKE node pool cannot mint (node pools
+# carry cloud-platform, and scopes are fixed at pool creation). Vertex AI serves
+# the same models and accepts cloud-platform. See docs/TROUBLESHOOTING.md § 25.
 # ─────────────────────────────────────────
 
 def _get_gemini_token():
     """Fetches a token from Workload Identity with the right scopes."""
     creds, _ = google.auth.default(scopes=[
         'https://www.googleapis.com/auth/cloud-platform',
-        'https://www.googleapis.com/auth/generative-language',
     ])
     auth_req = google.auth.transport.requests.Request()
     creds.refresh(auth_req)
@@ -118,23 +123,33 @@ def _get_gemini_token():
 
 
 def call_gemini(prompt: str) -> str:
-    """Calls the Gemini API (generativelanguage.googleapis.com)."""
+    """Calls Gemini on Vertex AI."""
     try:
         token = _get_gemini_token()
-        url = f'https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent'
+        url = (
+            f'https://{LOCATION}-aiplatform.googleapis.com/v1'
+            f'/projects/{PROJECT_ID}/locations/{LOCATION}'
+            f'/publishers/google/models/{MODEL_ID}:generateContent'
+        )
         payload = json.dumps({
-            'contents': [{'parts': [{'text': prompt}]}]
+            'contents': [{'role': 'user', 'parts': [{'text': prompt}]}]
         }).encode()
 
         req = urllib.request.Request(url, data=payload, headers={
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json',
-            'x-goog-user-project': PROJECT_ID,
         })
 
         resp = urllib.request.urlopen(req, timeout=30)
         result = json.loads(resp.read())
-        return result['candidates'][0]['content']['parts'][0]['text']
+
+        # Thinking models can emit reasoning parts alongside the answer. Those are
+        # flagged with "thought": true and must be skipped, otherwise the user (and
+        # the AIRS response scan) would see the model's scratchpad, not its reply.
+        parts = result['candidates'][0]['content'].get('parts', [])
+        return ''.join(
+            p['text'] for p in parts if 'text' in p and not p.get('thought')
+        )
 
     except Exception as e:
         logger.error(f"{T['system']['log_gemini_error']}: {e}")

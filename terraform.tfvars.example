@@ -43,7 +43,9 @@ gke_max_node_count = 4
 # ─────────────────────────────────────────
 # Vertex AI
 # ─────────────────────────────────────────
-vertex_ai_model         = "gemini-flash-latest"
+vertex_ai_model         = "gemini-2.5-flash"   # ⚠️ Explicit version, not a "-latest" alias.
+#                                                Aliases like gemini-flash-latest exist only on
+#                                                generativelanguage.googleapis.com and 404 on Vertex AI.
 vertex_ai_endpoint_name = "airs-gemini-endpoint"
 
 # ─────────────────────────────────────────

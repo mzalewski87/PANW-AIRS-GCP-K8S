@@ -51,7 +51,7 @@
 | **Code in the app** | None | SDK calls | None |
 | **Firewall** | Required (SCM-generated TF) | Not required | Not required |
 | **API key** | Not needed | Required (from SCM) | Required (AIRS + Portkey) |
-| **AI model** | `gemini-flash-latest` (Google AI API) | `gemini-flash-latest` (Google AI API) | `claude-haiku-4-5` (Vertex AI) |
+| **AI model** | `gemini-2.5-flash` (Vertex AI) | `gemini-2.5-flash` (Vertex AI) | `claude-haiku-4-5` (Vertex AI) |
 | **Blocks with** | Session drop | SDK verdict `block` | HTTP 446 |
 | **Extra** | TLS decryption | — | MCP tools → indirect injection demo |
 

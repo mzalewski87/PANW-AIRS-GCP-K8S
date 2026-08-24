@@ -416,7 +416,7 @@ except: pass" 2>/dev/null)
 
 if [ -n "$POD" ]; then
   echo "  Pod: $POD (Ready)"
-  for HOST in generativelanguage.googleapis.com service.api.aisecurity.paloaltonetworks.com; do
+  for HOST in us-central1-aiplatform.googleapis.com service.api.aisecurity.paloaltonetworks.com; do
     RESULT=$(kubectl exec -n ai-chatbot "$POD" -- timeout 5 curl -sko /dev/null -w "%{http_code}/%{time_total}s" -I "https://$HOST" 2>/dev/null || echo "TIMEOUT")
     echo "    $HOST → $RESULT"
   done

@@ -84,10 +84,13 @@ variable "gke_max_node_count" {
 # ─────────────────────────────────────────
 # Vertex AI
 # ─────────────────────────────────────────
+# ⚠️ Must be a model ID that Vertex AI serves, not a Gemini API alias.
+# The moving aliases (gemini-flash-latest, gemini-pro-latest) exist only on
+# generativelanguage.googleapis.com and 404 on Vertex – pin an explicit version.
 variable "vertex_ai_model" {
-  description = "Vertex AI model (Gemini) to use"
+  description = "Vertex AI model (Gemini) to use – an explicit version, e.g. gemini-2.5-flash"
   type        = string
-  default     = "gemini-flash-latest"
+  default     = "gemini-2.5-flash"
 }
 
 variable "vertex_ai_endpoint_name" {
