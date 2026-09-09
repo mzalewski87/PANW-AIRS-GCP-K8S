@@ -39,7 +39,9 @@ PORTKEY_API_KEY = os.environ.get("PORTKEY_API_KEY", "")
 # slug (@vertex-***) when the guardrail is attached at the workspace default.
 PORTKEY_CONFIG = os.environ.get("PORTKEY_CONFIG", "")
 PORTKEY_PROVIDER = os.environ.get("PORTKEY_PROVIDER", "")
-MODEL = os.environ.get("GW_MODEL", "claude-haiku-4-5")
+# The anthropic. prefix selects publishers/anthropic on Vertex AI; a plain name
+# resolves to publishers/google and 404s. See docs/AI_GATEWAY_SETUP.md § 5.
+MODEL = os.environ.get("GW_MODEL", "anthropic.claude-haiku-4-5")
 APP_LANG = os.environ.get("APP_LANG", "en")
 DOCUMENTS_DIR = Path(os.environ.get("DOCUMENTS_DIR", Path(__file__).parent / "documents"))
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "2"))
@@ -99,7 +101,12 @@ def gateway_headers() -> dict:
     if PORTKEY_CONFIG:
         headers["x-portkey-config"] = PORTKEY_CONFIG
     if PORTKEY_PROVIDER:
-        headers["x-portkey-provider"] = PORTKEY_PROVIDER
+        # A workspace provider slug must be passed as "@slug"; a bare slug is
+        # rejected with "Invalid provider passed" (only built-in provider names
+        # like "openai" work unprefixed). Normalise so the ConfigMap can hold
+        # either form.
+        slug = PORTKEY_PROVIDER if PORTKEY_PROVIDER.startswith("@") else f"@{PORTKEY_PROVIDER}"
+        headers["x-portkey-provider"] = slug
     return headers
 
 

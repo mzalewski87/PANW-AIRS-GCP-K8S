@@ -83,11 +83,21 @@ echo ""
 # ─────────────────────────────────────────
 echo "FIX 1b: Looking for the default route..."
 
-# NOTE: destRange MUST stay in the filter. Matching on the name alone also picks up
+# NOTE: destRange MUST stay in the match. Matching on the name alone also picks up
 # the auto-generated subnet routes `default-route-r-*`, which GCP refuses to delete.
+#
+# The name match is done client-side, NOT in --filter. Two filter terms are fine,
+# but adding a third makes gcloud push the whole expression server-side, and the
+# Compute API then rejects destRange with:
+#   Invalid value for field 'filter' ... Invalid list filter expression
+# The `~` operator alone is not enough to keep evaluation local once the
+# expression grows. Same class of trap as using `:` instead of `~`.
+# `|| true` because grep exits 1 when nothing matches, and under `set -e` that
+# would abort the script on the perfectly normal "route already removed" case
+# (this script is meant to be re-runnable after every SCM apply).
 DEFAULT_ROUTE=$(gcloud compute routes list --project="$PROJECT_ID" \
-  --filter="network~${APP_VPC} AND destRange=0.0.0.0/0 AND name~default-route" \
-  --format="value(name)" | head -1)
+  --filter="network~${APP_VPC} AND destRange=0.0.0.0/0" \
+  --format="value(name)" | { grep -E '^default-route-' || true; } | head -1)
 
 if [ -n "$DEFAULT_ROUTE" ]; then
   echo "  Found: $DEFAULT_ROUTE"
@@ -108,29 +118,35 @@ echo "FIX 2: VPC Peering Trust VPC → App VPC..."
 
 PEERING_NAME="${TRUST_VPC}-to-${APP_VPC}"
 
-if gcloud compute networks peerings describe "$PEERING_NAME" \
-     --network="$TRUST_VPC" \
-     --project="$PROJECT_ID" &>/dev/null; then
-  echo "  ✅ Peering $PEERING_NAME already exists"
-else
-  # Try alternate name
-  EXISTING=$(gcloud compute networks peerings list \
-    --network="$TRUST_VPC" --project="$PROJECT_ID" \
-    --filter="peerNetwork ~ ${APP_VPC}" --format="value(name)" 2>/dev/null | head -1)
+# Detect an EXISTING peering by peer network, not by name: SCM names its own
+# peering `<trust-vpc>-<app-vpc>`, which is not the name we would create.
+# Matching on our name only would miss it and we would try to create a duplicate.
+#
+# Two gcloud traps here, both previously silent:
+#   - there is no `networks peerings describe` subcommand at all;
+#   - `--filter="peerNetwork ~ ..."` is rejected by the API (no such field),
+#     and with stderr discarded the assignment just came back empty — which
+#     under `set -e` aborted the script before FIX 2 ever ran.
+# `peerings list` returns the NETWORK object with a nested peerings[] array, so
+# flatten it and match the peer network URL client-side.
+EXISTING=$(gcloud compute networks peerings list \
+  --network="$TRUST_VPC" --project="$PROJECT_ID" \
+  --flatten="peerings[]" \
+  --format="value(peerings.name,peerings.network)" 2>/dev/null \
+  | { grep -F "/${APP_VPC}" || true; } | awk '{print $1}' | head -1)
 
-  if [ -n "$EXISTING" ]; then
-    echo "  ✅ Peering exists as: $EXISTING"
-  else
-    echo "  ⚠️  No peering — creating..."
-    gcloud compute networks peerings create "$PEERING_NAME" \
-      --network="$TRUST_VPC" \
-      --peer-project="$PROJECT_ID" \
-      --peer-network="$APP_VPC" \
-      --import-custom-routes \
-      --export-custom-routes \
-      --project="$PROJECT_ID"
-    echo "  ✅ Peering $PEERING_NAME created"
-  fi
+if [ -n "$EXISTING" ]; then
+  echo "  ✅ Peering to $APP_VPC already exists: $EXISTING"
+else
+  echo "  ⚠️  No peering — creating..."
+  gcloud compute networks peerings create "$PEERING_NAME" \
+    --network="$TRUST_VPC" \
+    --peer-project="$PROJECT_ID" \
+    --peer-network="$APP_VPC" \
+    --import-custom-routes \
+    --export-custom-routes \
+    --project="$PROJECT_ID"
+  echo "  ✅ Peering $PEERING_NAME created"
 fi
 
 echo ""
@@ -150,8 +166,15 @@ gcloud compute routes list --project="$PROJECT_ID" \
 
 echo ""
 echo "VPC Peering:"
+# `peerings list` returns NETWORK objects with a nested peerings[] array – the
+# columns live under peerings.*, so without --flatten the table prints one row
+# per network with every field blank. There is no top-level `peerNetwork`.
 gcloud compute networks peerings list --project="$PROJECT_ID" \
-  --format="table(name,network,peerNetwork,state)"
+  --flatten="peerings[]" \
+  --format="table(name:label=NETWORK,
+                  peerings.name:label=PEERING,
+                  peerings.network.basename():label=PEER_NETWORK,
+                  peerings.state:label=STATE)"
 
 echo ""
 echo "══════════════════════════════════════════════════"

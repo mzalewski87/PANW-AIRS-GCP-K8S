@@ -172,8 +172,35 @@ resource "google_secret_manager_secret_iam_member" "gke_sa_airs_key" {
 # SCM Cloud Account Onboarding Prerequisites
 # ═══════════════════════════════════════════════════════════════════
 
-# GCS Bucket for AIRS logs and SCM discovery
+# ─────────────────────────────────────────
+# GCS bucket for AIRS logs and SCM discovery
+#
+# SCM reads discovery logs from whichever bucket you named in the Cloud Account
+# onboarding wizard. Normally that is the bucket created here, and you copy the
+# name out of `terraform output scm_onboarding_bucket_name`.
+#
+# When the account was onboarded FIRST against a bucket you had already created,
+# set `scm_log_bucket_name` to it instead. The sink then writes where SCM is
+# actually looking — a sink pointed at a bucket SCM does not watch fails
+# silently: traffic generation succeeds, the bucket fills up, and discovery
+# still finds nothing.
+# ─────────────────────────────────────────
+locals {
+  create_log_bucket = trimspace(var.scm_log_bucket_name) == ""
+  log_bucket_name = local.create_log_bucket ? (
+    google_storage_bucket.airs_logs[0].name
+  ) : data.google_storage_bucket.existing_logs[0].name
+}
+
+# Look the pre-existing bucket up rather than trusting the string: a typo here
+# would otherwise surface much later, as an empty SCM discovery.
+data "google_storage_bucket" "existing_logs" {
+  count = local.create_log_bucket ? 0 : 1
+  name  = var.scm_log_bucket_name
+}
+
 resource "google_storage_bucket" "airs_logs" {
+  count         = local.create_log_bucket ? 1 : 0
   name          = "${var.project_id}-airs-logs"
   project       = var.project_id
   location      = var.region
@@ -216,7 +243,7 @@ resource "google_project_service_identity" "logging" {
 resource "google_logging_project_sink" "airs_log_sink" {
   name        = "airs-scm-discovery-sink"
   project     = var.project_id
-  destination = "storage.googleapis.com/${google_storage_bucket.airs_logs.name}"
+  destination = "storage.googleapis.com/${local.log_bucket_name}"
 
   filter = <<-EOT
     (logName =~ "logs/cloudaudit.googleapis.com%2Fdata_access" AND protoPayload.methodName:("google.cloud.aiplatform."))
@@ -230,7 +257,7 @@ resource "google_logging_project_sink" "airs_log_sink" {
 }
 
 resource "google_storage_bucket_iam_member" "sink_writer" {
-  bucket = google_storage_bucket.airs_logs.name
+  bucket = local.log_bucket_name
   role   = "roles/storage.objectCreator"
   member = google_logging_project_sink.airs_log_sink.writer_identity
 }

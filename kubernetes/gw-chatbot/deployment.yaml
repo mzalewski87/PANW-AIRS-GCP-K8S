@@ -56,6 +56,14 @@ spec:
                 configMapKeyRef:
                   name: gw-chatbot-env
                   key: PORTKEY_CONFIG
+            # Alternative to PORTKEY_CONFIG: route by provider slug alone and
+            # let a workspace-level Organization Guardrail do the inspection.
+            # Exactly one of the two is normally set – see AI_GATEWAY_SETUP.md § 6b.
+            - name: PORTKEY_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: gw-chatbot-env
+                  key: PORTKEY_PROVIDER
             - name: GW_MODEL
               valueFrom:
                 configMapKeyRef:

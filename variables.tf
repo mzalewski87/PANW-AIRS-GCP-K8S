@@ -129,6 +129,23 @@ variable "airs_security_profile_name" {
   }
 }
 
+# ─────────────────────────────────────────
+# SCM discovery log bucket
+# ─────────────────────────────────────────
+# Leave empty for the normal order (Terraform first, then onboarding): a bucket
+# named <project_id>-airs-logs is created and you copy that name into the SCM
+# wizard.
+#
+# Set it only when the Cloud Account was onboarded BEFORE this Terraform ran and
+# you named a bucket of your own there. The log sink then targets that bucket
+# instead of creating a second one. Getting this wrong is silent — SCM watches
+# one bucket, the sink fills another, and discovery just never sees any traffic.
+variable "scm_log_bucket_name" {
+  description = "Name of a pre-existing GCS bucket that SCM Cloud Account onboarding was pointed at. Empty = create <project_id>-airs-logs and use that."
+  type        = string
+  default     = ""
+}
+
 variable "airs_api_endpoint" {
   description = "AIRS API endpoint URL (US region – default)"
   type        = string
@@ -170,6 +187,18 @@ variable "portkey_config_id" {
   default     = ""
 }
 
+variable "portkey_provider_slug" {
+  description = <<-EOT
+    Portkey provider slug (Vertex AI), used INSTEAD of portkey_config_id when the
+    workspace inspects traffic with an Organization Guardrail rather than a saved
+    config. Set exactly one of the two. Inspection is proven by the deploy-time
+    probe in scripts/deploy-gw-chatbot.sh, not by which of the two you picked.
+    See docs/AI_GATEWAY_SETUP.md § 6b.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "portkey_gateway_url" {
   description = "Portkey AI Gateway base URL (OpenAI-compatible endpoint)"
   type        = string
@@ -179,10 +208,16 @@ variable "portkey_gateway_url" {
 # Claude on Vertex AI is only served from a subset of regions – us-east5 for
 # the Anthropic models, NOT us-central1 (which 404s). The region is configured
 # on the Portkey provider, not here; this is only the model name the app asks for.
+#
+# The `anthropic.` prefix is not cosmetic: Portkey maps the model name onto a
+# Vertex publisher path, and a plain name builds publishers/GOOGLE/... which does
+# not serve Claude – a 404 that looks exactly like a wrong region. Prefix and
+# region are independent failure modes; fixing one still leaves the other 404ing.
+# Some providers accept the plain name – if the prefixed form 404s, try it.
 variable "gw_model" {
-  description = "Model name requested through the AI Gateway (Claude Haiku on Vertex AI)"
+  description = "Model name requested through the AI Gateway (Claude Haiku on Vertex AI). The anthropic. prefix selects publishers/anthropic – see docs/AI_GATEWAY_SETUP.md § 5."
   type        = string
-  default     = "claude-haiku-4-5"
+  default     = "anthropic.claude-haiku-4-5"
 }
 
 # ─────────────────────────────────────────

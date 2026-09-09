@@ -82,13 +82,13 @@ output "artifact_registry_url" {
 # SCM Onboarding
 # ─────────────────────────────────────────
 output "airs_logs_bucket" {
-  description = "GCS bucket for AIRS logs"
-  value       = google_storage_bucket.airs_logs.name
+  description = "GCS bucket the discovery sink writes to (created here, or the pre-existing one named in scm_log_bucket_name)"
+  value       = local.log_bucket_name
 }
 
 output "scm_onboarding_bucket_name" {
   description = "⚠️ EXACT bucket name to COPY into SCM Cloud Account onboarding. Do NOT type it manually!"
-  value       = google_storage_bucket.airs_logs.name
+  value       = local.log_bucket_name
 }
 
 # ─────────────────────────────────────────
@@ -118,7 +118,7 @@ output "scm_deployment_inputs" {
     app_subnet_cidr = module.vpc.app_subnet_cidr
 
     # Bucket name for SCM onboarding (COPY-PASTE this!)
-    airs_logs_bucket = google_storage_bucket.airs_logs.name
+    airs_logs_bucket = local.log_bucket_name
 
     note = "SCM creates its own VPCs (mgmt, untrust, trust) and peers Trust with our App VPC."
   }
