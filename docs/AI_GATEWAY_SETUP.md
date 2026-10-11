@@ -55,7 +55,7 @@ goes back through the gateway.
 | **Code in the app** | none | `pan-aisecurity` SDK calls | **none** |
 | **Needs a firewall** | ✅ yes | ❌ no | ❌ no |
 | **Needs pan-cni** | ✅ yes | ❌ no | ❌ no |
-| **Model** | Gemini (Google AI API) | Gemini (Google AI API) | **Claude Haiku (Vertex AI)** |
+| **Model** | Gemini (Vertex AI) | Gemini (Vertex AI) | **Claude Haiku (Vertex AI)** |
 | **Blocks with** | session drop | SDK verdict `block` | **HTTP 446** |
 | **Sees MCP tool output** | only as TLS bytes | only if the app scans it | **✅ natively** |
 
@@ -190,28 +190,32 @@ The gateway needs to know where to send the model call.
 
    Upload `aigw-svc.json` to Portkey, then delete the local copy — `*.json` is
    gitignored, but a downloaded SA key on disk is still a long-lived credential.
-3. **Region: `us-east5`.**
-4. Note the slug Portkey assigns, e.g. `<project>-4bcfc0ca9a07`.
+3. **Region / location: `global`.**
+4. Enable the model in **Vertex AI → Model Garden** (Claude Haiku model card →
+   **Enable**) — until you do, every call fails no matter how the provider is set.
+5. Note the slug Portkey assigns, e.g. `<project>-4bcfc0ca9a07`.
 
-> ### ⚠️ Claude on Vertex is not in `us-central1`
+> ### ⚠️ Claude on Vertex is not in `us-central1` — use `global`
 > The rest of this demo runs in `us-central1`, but Anthropic models on Vertex AI
-> are served from a different set of regions — `us-east5` for Haiku. Point the
-> provider at `us-central1` and every call 404s.
+> are not served there — point the provider at `us-central1` and every call 404s.
+> Use the **`global`** location: `anthropic.claude-haiku-5-5` answers 200 there.
+> A regional endpoint such as `us-east5` does serve the model, but a new project
+> has **zero default quota** in it, so every call returns **429**.
 
 > ### ⚠️ Model naming — the `anthropic.` prefix decides the publisher
 > Portkey turns the model name into a Vertex path. A **plain** name builds
-> `.../publishers/google/models/claude-haiku-4-5` — the *Google* publisher, which
+> `.../publishers/google/models/claude-haiku-5-5` — the *Google* publisher, which
 > does not serve Claude, so Vertex answers **404** no matter how correct the
 > region is. The **`anthropic.` prefix** is what selects
 > `publishers/anthropic`:
 >
 > ```
-> claude-haiku-4-5            → publishers/google/…     → 404
-> anthropic.claude-haiku-4-5  → publishers/anthropic/…  → 200
+> claude-haiku-5-5            → publishers/google/…     → 404
+> anthropic.claude-haiku-5-5  → publishers/anthropic/…  → 200
 > ```
 >
 > Which form your provider needs depends on how it was created, so treat the
-> default (`anthropic.claude-haiku-4-5`) as the starting point and the plain name
+> default (`anthropic.claude-haiku-5-5`) as the starting point and the plain name
 > as the fallback. Region and prefix are **independent** failure modes — both
 > surface as 404, and fixing only the region leaves you still at 404. `GW_MODEL`
 > in the ConfigMap is the single place to change it.
@@ -296,7 +300,7 @@ curl https://aigw.portkey.ai/v1/chat/completions \
   -H "x-portkey-api-key: $PORTKEY_API_KEY" \
   -H "x-portkey-provider: @<provider-slug>" \
   -H "Content-Type: application/json" \
-  -d '{"model":"anthropic.claude-haiku-4-5","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"anthropic.claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}'
 ```
 
 > ⚠️ The `@` is **not optional** for a workspace provider slug. `-H
@@ -435,7 +439,7 @@ gw-chatbot (Flask, ns ai-gw-chatbot)        ← no scanning code whatsoever
 Portkey AI Gateway  ──►  ① input guardrail  → Prisma AIRS scan
   │                          fail → HTTP 446, model never called
   ▼
-Vertex AI · Claude Haiku (us-east5)
+Vertex AI · Claude Haiku (global)
   │
   ▼
 Portkey AI Gateway  ──►  ② output guardrail → Prisma AIRS scan
@@ -591,8 +595,9 @@ workspace key is data-plane only.
 
 ### `404` model not found
 
-The Vertex provider is in the wrong region — Anthropic models need **`us-east5`**
-(§ 5). If the region is right, try the `anthropic.`-prefixed model name.
+The Vertex provider is in the wrong region — Anthropic models need **`global`**
+(§ 5). If the region is right, check the model is enabled in Model Garden, then
+try the `anthropic.`-prefixed model name.
 
 ### Attacks return `200` — nothing is inspected
 

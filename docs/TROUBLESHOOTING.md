@@ -264,7 +264,7 @@ specific path `/php/login.php`.
 
 ### Symptoms
 ```bash
-kubectl exec -n ai-chatbot <pod> -- curl -m 5 https://us-central1-aiplatform.googleapis.com
+kubectl exec -n ai-chatbot <pod> -- curl -m 5 https://aiplatform.googleapis.com
 # → timeout
 ```
 
@@ -281,7 +281,7 @@ If the **ILB is UNHEALTHY** or **the firewalls are not configured**, the traffic
    - SCM config: zones, interfaces, loopbacks, LR, NAT, security policy
    - Push Config in SCM
 3. Verify: `gcloud compute backend-services get-health <PREFIX>-internal-lb --region=$REGION` – all HEALTHY
-4. Test: `kubectl exec -n ai-chatbot <pod> -- curl -I https://us-central1-aiplatform.googleapis.com` should return HTTP 404 (or 405) quickly
+4. Test: `kubectl exec -n ai-chatbot <pod> -- curl -I https://aiplatform.googleapis.com` should return HTTP 404 (or 405) quickly
 
 ---
 
@@ -295,7 +295,7 @@ curl http://<chatbot-external-ip>/api/chat -X POST -d '{"message":"hi"}'
 
 ### Root cause
 The external LoadBalancer is working (TCP connections accepted), BUT:
-- The application in the pod cannot make a call to Gemini API (or AIRS API for api-chatbot)
+- The application in the pod cannot make a call to Vertex AI (Gemini) (or AIRS API for api-chatbot)
 - Because there is no egress from the pod to the internet
 
 This is the same symptom as [problem #5](#5-pods-have-no-internet-egress-timeout) seen from the user side.
@@ -305,7 +305,7 @@ This is the same symptom as [problem #5](#5-pods-have-no-internet-egress-timeout
 **Quick test without the application:**
 ```bash
 POD=$(kubectl get pod -n ai-chatbot -l app=ai-chatbot -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n ai-chatbot "$POD" -- timeout 5 curl -sko /dev/null -w "%{http_code}\n" -I https://us-central1-aiplatform.googleapis.com
+kubectl exec -n ai-chatbot "$POD" -- timeout 5 curl -sko /dev/null -w "%{http_code}\n" -I https://aiplatform.googleapis.com
 # Working firewall → HTTP 404 or 405
 # No egress → timeout / no response
 ```
@@ -1133,7 +1133,7 @@ curl -s localhost:8082/api/gateway-status | python3 -m json.tool
 | `guardrail_attached: false` | ← the problem: no guardrail in the request path |
 | `config: null` | No `pc-***` config was sent at all |
 | `http_status: 401` | Wrong Portkey key, or hitting `api.portkey.ai` instead of `aigw.portkey.ai` |
-| `http_status: 404` | Vertex provider in the wrong region — Claude needs **us-east5** |
+| `http_status: 404` | Vertex provider in the wrong region — Claude needs **global** |
 
 **Causes, in order of likelihood:**
 
@@ -1291,11 +1291,15 @@ accepts `cloud-platform`:
 
 ```
 https://us-central1-aiplatform.googleapis.com/v1beta/models/{MODEL}:generateContent
-→ https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/google/models/{MODEL}:generateContent
+→ https://aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/global/publishers/google/models/{MODEL}:generateContent
 ```
 
 Both apps do this as of the Vertex AI migration. If you are on an older image,
-rebuild.
+rebuild. The apps default to the **`global`** location (`aiplatform.googleapis.com`,
+no region prefix) with `gemini-3.8-flash` — Gemini 3.x is served only there, and
+`us-central1-aiplatform.googleapis.com` answers 404 for it. A regional host
+(`{REGION}-aiplatform.googleapis.com`, `locations/{REGION}`) is used only when
+`vertex_ai_location` names a region that actually publishes the model.
 
 > ### ⚠️ On a cluster that already has TLS decryption, do not re-run `deploy-app.sh`
 > It reapplies the deployment manifests, which drops the Root CA mount added by
@@ -1309,24 +1313,26 @@ rebuild.
 > gcloud builds submit kubernetes/app/         --tag "$REG/chatbot:latest"     --region <region> --quiet
 > gcloud builds submit kubernetes/api-chatbot/ --tag "$REG/api-chatbot:latest" --region <region> --quiet
 >
-> # The model name lives in a ConfigMap, not in the image:
-> kubectl patch cm ai-chatbot-config  -n ai-chatbot     --type merge -p '{"data":{"VERTEX_AI_MODEL":"gemini-2.5-flash"}}'
-> kubectl patch cm api-chatbot-config -n ai-api-chatbot --type merge -p '{"data":{"VERTEX_AI_MODEL":"gemini-2.5-flash"}}'
+> # Model + location live in the ConfigMaps deploy-app.sh writes, not in the image:
+> kubectl patch cm ai-chatbot-env  -n ai-chatbot     --type merge -p '{"data":{"VERTEX_AI_MODEL":"gemini-3.8-flash","VERTEX_AI_LOCATION":"global"}}'
+> kubectl patch cm api-chatbot-env -n ai-api-chatbot --type merge -p '{"data":{"VERTEX_AI_MODEL":"gemini-3.8-flash","GCP_LOCATION":"global"}}'
 >
 > kubectl rollout restart deployment/ai-chatbot  -n ai-chatbot
 > kubectl rollout restart deployment/api-chatbot -n ai-api-chatbot
 > ```
 >
-> Note `api-chatbot` reads **`api-chatbot-config`**, not `api-chatbot-env` — both
-> ConfigMaps exist in that namespace and only the former is wired into the
-> deployment via `envFrom`. Confirm what the app actually resolved with
-> `curl /api/chat` and check the `model` field in the reply.
+> Both namespaces have two ConfigMaps: `*-config` (defaults from the manifest) and
+> `*-env` (values from `terraform output`, written by `deploy-app.sh`). The `-env`
+> one wins — for ai-chatbot it is the later `envFrom`, for api-chatbot it feeds
+> explicit `env` entries (`GCP_LOCATION`, `VERTEX_AI_MODEL`), which beat
+> `envFrom`. Patching `*-config` alone therefore changes nothing. Confirm what the
+> app actually resolved with `curl /api/chat` and check the `model` field in the reply.
 
 Three details that matter when porting the call:
 
 | Detail | Gemini API | Vertex AI |
 | ------ | ---------- | --------- |
-| Model name | `gemini-flash-latest` works | **404** – moving aliases do not exist; pin `gemini-2.5-flash` |
+| Model name | `gemini-flash-latest` works | **404** – moving aliases do not exist; pin `gemini-3.8-flash` (on `global`) |
 | `x-goog-user-project` header | required | not needed – the project is in the URL |
 | `contents[].role` | optional | send `"role": "user"` |
 
@@ -1341,13 +1347,13 @@ parts.
 >
 > ```bash
 > kubectl exec -n ai-chatbot "$POD" -- sh -c \
->   'echo | openssl s_client -connect us-central1-aiplatform.googleapis.com:443 \
->    -servername us-central1-aiplatform.googleapis.com 2>/dev/null | openssl x509 -noout -issuer'
+>   'echo | openssl s_client -connect aiplatform.googleapis.com:443 \
+>    -servername aiplatform.googleapis.com 2>/dev/null | openssl x509 -noout -issuer'
 > # issuer=CN=... Forward Trust CA ECDSA   ← decrypted by the VM-Series
 > ```
 >
 > If it returns a Google issuer instead, the decryption rule does not cover the
-> new FQDN — check the SCM decryption policy and any FQDN-based security rules
+> new FQDN (`aiplatform.googleapis.com`) — check the SCM decryption policy and any FQDN-based security rules
 > that still name `generativelanguage.googleapis.com`.
 
 ---
@@ -1467,7 +1473,7 @@ curl -s https://aigw.portkey.ai/v1/chat/completions \
   -H "x-portkey-api-key: $PORTKEY_API_KEY" \
   -H "x-portkey-provider: @$PORTKEY_PROVIDER" \
   -H "Content-Type: application/json" \
-  -d '{"model":"anthropic.claude-haiku-4-5","max_tokens":30,
+  -d '{"model":"anthropic.claude-haiku-5-5","max_tokens":30,
        "messages":[{"role":"user","content":"What is the per-diem?"},
                    {"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function",
                      "function":{"name":"search_documents","arguments":"{\"query\":\"per-diem\"}"}}]},

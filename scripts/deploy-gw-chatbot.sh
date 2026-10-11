@@ -70,7 +70,7 @@ GW_MODEL="${GW_MODEL:-$(tfvar 'gw_model')}"
 # The anthropic. prefix selects publishers/anthropic on Vertex. Without it
 # Portkey builds publishers/google/... which does not serve Claude → 404,
 # indistinguishable from the wrong-region 404. See AI_GATEWAY_SETUP.md § 5.
-[ -z "$GW_MODEL" ] && GW_MODEL="anthropic.claude-haiku-4-5"
+[ -z "$GW_MODEL" ] && GW_MODEL="anthropic.claude-haiku-5-5"
 
 # 🔴 No fallback for the key or the config. An empty key means every gateway
 # call returns 401; an empty config means the request is routed WITHOUT the

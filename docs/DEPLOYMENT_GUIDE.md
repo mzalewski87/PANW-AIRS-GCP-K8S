@@ -191,6 +191,15 @@ curl -s https://ifconfig.me; echo
 > Also update `allowed_mgmt_cidrs` in `terraform.tfvars`, or the next `deploy-app.sh`
 > will put the stale IP back.
 
+> ⚠️ **Vertex AI model and location** have working defaults: `vertex_ai_model =
+> "gemini-3.8-flash"` and `vertex_ai_location = "global"`. The location is **not**
+> the cluster region — Gemini 3.x is served only on `global`
+> (`aiplatform.googleapis.com`, no region prefix); `us-central1-aiplatform.googleapis.com`
+> returns 404 for it. (`gemini-2.5-flash` is retired on Vertex AI on 2026-10-20.)
+> `deploy-app.sh` passes both values into the chatbots' `*-env` ConfigMaps — earlier
+> versions ignored `vertex_ai_model` entirely (the model was hardcoded in the YAML), so
+> changing it in `terraform.tfvars` now actually takes effect.
+
 ### 3.3a 🔴 CRITICAL: the GKE version is pinned for PAN CNI
 
 PANW documents CNI chaining as requiring
@@ -200,7 +209,7 @@ and lists `containerd` among the supported runtimes
 
 Recent GKE breaks the **upper** bound of that statement:
 
-| GKE version | `cniVersion` in the Dataplane V2 conflist | pan-cni |
+| GKE **node** version | `cniVersion` in the Dataplane V2 conflist | pan-cni |
 |---|---|---|
 | ≤ 1.34.x | `0.3.1` | ✅ works |
 | ≥ 1.35.1-gke.1516000 | `1.1.0` | ❌ all nodes NotReady |
@@ -209,10 +218,29 @@ GKE Dataplane V2 clusters running 1.35.1-gke.1516000 or later
 [now use CNI version 1.1.0 in the CNI configuration files](https://docs.cloud.google.com/kubernetes-engine/docs/release-notes);
 per Google, *"if you use an incompatible CNI version, nodes might fail to reach a Ready
 state and might show `NetworkPluginNotReady` errors."* With CNI 1.1.0 the runtime issues
-the CNI **`STATUS`** verb. Every published `pan-cni` image (`4.0.0`, `4.0.1`, `4.0.2`/`latest`)
-advertises `0.1.0/0.2.0/0.3.0/0.3.1/0.4.0` only and replies
+the CNI **`STATUS`** verb. The `pan-cni` images `4.0.0`, `4.0.1` and `4.0.2`
+advertise `0.1.0/0.2.0/0.3.0/0.3.1/0.4.0` only and reply
 `unknown CNI_COMMAND: STATUS` → **the entire cluster goes NotReady** minutes after
-`helm install`.
+`helm install`. `4.0.3` is now `latest` (pushed ~2026-09-18); static inspection of
+its binary shows no `STATUS` support either (still `unknown CNI_COMMAND`, no
+`STATUS` string) — **not verified live**. This repo stays pinned to the tested `4.0.2`.
+
+> 💡 **The threshold applies to the NODES, not the control plane.** The conflist is
+> written by each node's own bootstrap (§ 3.3b). Control-plane auto-upgrades **cannot
+> be disabled** on any GKE cluster, so a master above 1.35.1-gke.1516000 is expected
+> and harmless. Observed on this deployment: the master auto-upgraded 1.34 →
+> 1.35.6-gke.1250001 on 2026-10-05, the nodes (`auto_upgrade = false`) stayed on
+> v1.34.11-gke.1044000, the conflist stayed `"cniVersion": "0.3.1"`, and pan-cni kept
+> working. Check what matters — the node pool:
+> ```bash
+> kubectl get nodes        # VERSION column must stay below 1.35.1-gke.1516000
+> ```
+> plus the conflist check below.
+>
+> 📅 **GKE deadlines** ([release schedule](https://docs.cloud.google.com/kubernetes-engine/docs/release-schedule)):
+> 1.34 end of standard support is **2027-01-25** — after that GKE force-upgrades the
+> nodes even with `auto_upgrade = false`. The no-channel (`UNSPECIFIED`) option is
+> removed on **2027-06-14**, when such clusters are enrolled in the Stable channel.
 
 Therefore `modules/gke` pins:
 
@@ -235,9 +263,9 @@ gcloud container get-server-config --region=$REGION --project=$PROJECT_ID \
 #   c) run API Runtime Intercept only — it needs no CNI chaining and no version pin.
 ```
 
-> ⚠️ **Do not put this cluster in a release channel and do not enable auto-upgrade**
-> while you use Network Intercept. GKE would silently upgrade past the limit and take
-> the cluster down.
+> ⚠️ **Do not put this cluster in a release channel and do not enable node auto-upgrade**
+> while you use Network Intercept. GKE would silently upgrade the nodes past the limit
+> and take the cluster down. (The control plane auto-upgrades regardless — harmless, see above.)
 >
 > ✅ Bump the pin once PANW publishes a `pan-cni` implementing CNI spec 1.1.0. Verify with:
 > ```bash
@@ -367,7 +395,7 @@ The script builds and deploys:
 - `paloaltonetworks.com/subnetfirewall=ai-chatbot/bypass-metadata-and-internal` – traffic to
   `169.254.169.254` (GCP metadata) and to the RFC1918 / service CIDRs **bypasses the
   firewall**. Without this Workload Identity cannot fetch a token → the app cannot call
-  the Gemini API.
+  Vertex AI (Gemini).
 
 > 🔴 The reference is **namespace-local** (`ai-chatbot/...`, not `kube-system/...`).
 > pan-cni 4.0.2 rejects a cross-namespace `SubnetInfo` reference outright — the pod
@@ -438,7 +466,7 @@ kubectl port-forward svc/gw-chatbot 8082:80 -n ai-gw-chatbot
 
 ## 6. PHASE 4 – Onboarding the GCP account in SCM
 
-> **Source:** https://docs.paloaltonetworks.com/ai-runtime-security/activation-and-onboarding/onboard-and-activate-cloud-account-in-scm/gcp-onboarding-prereq-and-steps
+> **Source:** https://docs.paloaltonetworks.com/prisma-airs/ai-inventory/cloud-resource-discovery/onboard-and-activate-cloud-account-in-scm/onboard-gcp-cloud-account-in-scm
 
 ### 6.1 Prerequisites (automatically met by Terraform)
 
@@ -493,7 +521,8 @@ gcloud beta services identity create \
     terraform apply
     ```
     Output: `service_account_email = "panw-discovery-****@PROJECT_ID.iam.gserviceaccount.com"`
-12. Click **Done** in SCM
+12. Wait **~10 s** after `terraform apply` finishes, then click **Done** in SCM
+    (known issue AIFW-690)
 
 > Discovery takes ~15 minutes. Assets will appear on the SCM dashboard.
 
@@ -501,7 +530,7 @@ gcloud beta services identity create \
 
 ## 7. PHASE 5 – AIRS Network Intercept (SCM Deployment)
 
-> **Source:** https://docs.paloaltonetworks.com/ai-runtime-security/administration/deploy-ai-instances-in-public-clouds-as-a-software/add-ai-instance-for-gcp
+> **Source:** https://docs.paloaltonetworks.com/prisma-airs/ai-runtime-security/airs-managed-saas-firewall/add-ai-instance-for-gcp
 
 ### 7.1 Add protection in SCM
 
@@ -1217,7 +1246,7 @@ After the push, check the health checks in Google Cloud:
 > ⚠️ **WITHOUT TLS DECRYPTION AIRS does not see the contents of prompts or AI responses!**
 >
 > The applications talk to Gemini on Vertex AI over HTTPS. Without TLS decryption the firewall sees
-> only the SNI (the hostname `us-central1-aiplatform.googleapis.com`), but does NOT see the contents —
+> only the SNI (the hostname `aiplatform.googleapis.com`), but does NOT see the contents —
 > prompts, responses, PII, prompt injection attempts. All AI Security Profile protection
 > (prompt injection, PII/DLP, jailbreak, toxic content detection) requires visibility into the body.
 
@@ -1848,7 +1877,7 @@ below therefore has to be created in the UI; there is no scriptable path.
 | 1 | Workspace + API key | `portkey_api_key` |
 | 2 | AIRS application + profile + API key (in SCM) | guardrail credentials |
 | 3 | Guardrail from the Prisma AIRS integration | `pg--...` |
-| 4 | Vertex AI provider (**region `us-east5`**) | provider slug |
+| 4 | Vertex AI provider (**location `global`**, model enabled in Model Garden) | provider slug |
 | 5 | Config binding guardrail → provider | **`pc-...`** |
 
 ### 11.2 Two traps that will silently disable protection
@@ -1873,10 +1902,11 @@ Also worth knowing before you debug the wrong thing:
   Symptom: `topic_violation: True` on benign input.
 - **Scan Scope must be `all_messages`**, otherwise tool output is not inspected
   and the indirect-injection demo silently fails to trigger.
-- **Claude on Vertex is not in `us-central1`** — the Anthropic models live in
-  `us-east5`. Wrong region → 404 on every call.
+- **Claude on Vertex is not in `us-central1`** — point the provider at the
+  `global` location. Wrong region → 404 on every call; `us-east5` serves the model
+  but a new project has zero default quota there → 429.
 - **The `anthropic.` model prefix picks the Vertex publisher.** A plain
-  `claude-haiku-4-5` builds `publishers/google/...` and 404s exactly like a wrong
+  `claude-haiku-5-5` builds `publishers/google/...` and 404s exactly like a wrong
   region. Region and prefix are independent — fix both.
 - **The AIRS profile behind the guardrail must be set to BLOCK.** A detect-only
   profile returns `category: malicious` *and* `action: allow`; Portkey honours
@@ -2178,22 +2208,28 @@ gcloud compute instances get-serial-port-output <vm-series-name> \
 ### 13.2 Vertex AI 404 / 403
 
 Both chatbots call Gemini through **Vertex AI**
-(`<region>-aiplatform.googleapis.com`), not through the Gemini API. That choice
+(`aiplatform.googleapis.com`, location `global`), not through the Gemini API. That choice
 is forced, not stylistic — see [TROUBLESHOOTING § 25](TROUBLESHOOTING.md#25-both-chatbots-suddenly-return-403--access_token_scope_insufficient).
 
 **404 "Model not found":**
 - Vertex requires an **explicit model version**. The moving aliases
   (`gemini-flash-latest`, `gemini-pro-latest`) exist only on the Gemini API and
-  404 on Vertex. Use a pinned ID and bump it when the model retires:
+  404 on Vertex. Use a pinned ID and bump it when the model retires
+  (`gemini-2.5-flash` is retired on Vertex AI on 2026-10-20). The durable fix is
+  `vertex_ai_model` in `terraform.tfvars` + `terraform apply` + `./scripts/deploy-app.sh`;
+  for a quick live change:
   ```bash
-  kubectl set env deployment/ai-chatbot   -n ai-chatbot     VERTEX_AI_MODEL=gemini-2.5-flash
-  kubectl set env deployment/api-chatbot  -n ai-api-chatbot VERTEX_AI_MODEL=gemini-2.5-flash
+  kubectl set env deployment/ai-chatbot   -n ai-chatbot     VERTEX_AI_MODEL=gemini-3.8-flash
+  kubectl set env deployment/api-chatbot  -n ai-api-chatbot VERTEX_AI_MODEL=gemini-3.8-flash
   # List what your project can actually call in this region:
   gcloud ai models list --region=$REGION --project=$PROJECT_ID 2>/dev/null | head
   ```
-- Check the region: the model must be served in `VERTEX_AI_LOCATION` /
-  `GCP_LOCATION`. The URL embeds the region twice (host and path) and a
-  region that does not serve the model 404s.
+- Check the location: the model must be served in `VERTEX_AI_LOCATION` /
+  `GCP_LOCATION` (from `vertex_ai_location`, default `global`). Gemini 3.x is
+  served **only** on `global` (host `aiplatform.googleapis.com`, no region
+  prefix) — `us-central1-aiplatform.googleapis.com` 404s for it. For a regional
+  location the URL embeds the region twice (host and path) and a region that
+  does not serve the model 404s.
 
 **403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`:** the app is still calling
 `generativelanguage.googleapis.com` — an image built before the Vertex AI
@@ -2326,8 +2362,8 @@ PHASE 8: SCM → API Applications → API Key   ← SDK key
 |-------|-----|
 | Activation & Onboarding | https://docs.paloaltonetworks.com/ai-runtime-security/activation-and-onboarding |
 | GCP Onboarding Prerequisites | https://docs.paloaltonetworks.com/ai-runtime-security/activation-and-onboarding/onboard-and-activate-cloud-account-in-scm/gcp-onboarding-prereq-and-steps/discovery-onboarding-prerequisites-for-gcp |
-| GCP Cloud Account Onboarding | https://docs.paloaltonetworks.com/ai-runtime-security/activation-and-onboarding/onboard-and-activate-cloud-account-in-scm/gcp-onboarding-prereq-and-steps/onboard-gcp-cloud-account-in-scm |
-| Deploy Network Intercept | https://docs.paloaltonetworks.com/ai-runtime-security/administration/deploy-ai-instances-in-public-clouds-as-a-software/add-ai-instance-for-gcp |
+| GCP Cloud Account Onboarding | https://docs.paloaltonetworks.com/prisma-airs/ai-inventory/cloud-resource-discovery/onboard-and-activate-cloud-account-in-scm/onboard-gcp-cloud-account-in-scm |
+| Deploy Network Intercept | https://docs.paloaltonetworks.com/prisma-airs/ai-runtime-security/airs-managed-saas-firewall/add-ai-instance-for-gcp |
 | Container Security | https://docs.paloaltonetworks.com/ai-runtime-security/administration (Container Security section) |
 | AIRS Python SDK | https://pan.dev/prisma-airs/api/airuntimesecurity/pythonsdk/ |
 | AIRS API Docs | https://pan.dev/prisma-airs/api/airuntimesecurity/airuntimesecurityapi/ |

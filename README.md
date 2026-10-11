@@ -51,7 +51,7 @@
 | **Code in the app** | None | SDK calls | None |
 | **Firewall** | Required (SCM-generated TF) | Not required | Not required |
 | **API key** | Not needed | Required (from SCM) | Required (AIRS + Portkey) |
-| **AI model** | `gemini-2.5-flash` (Vertex AI) | `gemini-2.5-flash` (Vertex AI) | `anthropic.claude-haiku-4-5` (Vertex AI) |
+| **AI model** | `gemini-3.8-flash` (Vertex AI, `global`) | `gemini-3.8-flash` (Vertex AI, `global`) | `anthropic.claude-haiku-5-5` (Vertex AI, `global`) |
 | **Blocks with** | Session drop | SDK verdict `block` | HTTP 446 |
 | **Extra** | TLS decryption | — | MCP tools → indirect injection demo |
 
@@ -129,7 +129,8 @@ cp terraform.tfvars.example terraform.tfvars
 #
 # 🔴 Network Intercept pins GKE below 1.35.1-gke.1516000 – pan-cni does not implement
 #    the CNI STATUS verb and newer GKE takes every node NotReady. Confirm 1.34 is
-#    still offered before applying (see § 3.3a):
+#    still offered before applying (see § 3.3a). What matters is the NODE version –
+#    the control plane auto-upgrades past the threshold anyway, and that is harmless:
 gcloud container get-server-config --region=$REGION --project=$PROJECT_ID \
   --format="value(validMasterVersions)" | tr ';' '\n' | grep '^1\.34' | head -1
 terraform init && terraform apply
@@ -324,7 +325,7 @@ server, and the indirect prompt-injection demo.
 |-------|-----|
 | Activation & Onboarding | https://docs.paloaltonetworks.com/ai-runtime-security/activation-and-onboarding |
 | GCP Onboarding Prerequisites | https://docs.paloaltonetworks.com/ai-runtime-security/activation-and-onboarding/onboard-and-activate-cloud-account-in-scm/gcp-onboarding-prereq-and-steps/discovery-onboarding-prerequisites-for-gcp |
-| Deploy Network Intercept in GCP | https://docs.paloaltonetworks.com/ai-runtime-security/administration/deploy-ai-instances-in-public-clouds-as-a-software/add-ai-instance-for-gcp |
+| Deploy Network Intercept in GCP | https://docs.paloaltonetworks.com/prisma-airs/ai-runtime-security/airs-managed-saas-firewall/add-ai-instance-for-gcp |
 | AIRS Python SDK | https://pan.dev/prisma-airs/api/airuntimesecurity/pythonsdk/ |
 | Strata Cloud Manager | https://stratacloudmanager.paloaltonetworks.com |
 | Portkey AI Gateway (AI Gateway Intercept) | https://portkey.ai/docs/ |

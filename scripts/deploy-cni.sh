@@ -64,7 +64,7 @@ gcloud container clusters get-credentials "$CLUSTER_NAME" --region "$REGION" --p
 #
 # GKE Dataplane V2 on 1.35.1-gke.1516000+ writes "cniVersion": "1.1.0" into
 # 10-gke-cni.conflist. containerd 2.x then issues the CNI STATUS verb, which
-# pan-cni (all published tags 4.0.0/4.0.1/4.0.2 advertise up to CNI 0.4.0 only)
+# pan-cni (tags 4.0.0–4.0.2 advertise up to CNI 0.4.0 only; 4.0.3 believed the same)
 # rejects with `unknown CNI_COMMAND: STATUS`. Result: EVERY node goes NotReady
 # with NetworkPluginNotReady, cluster-wide outage. Recovery = helm uninstall.
 # ─────────────────────────────────────────

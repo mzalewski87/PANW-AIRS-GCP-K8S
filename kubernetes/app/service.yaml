@@ -57,8 +57,8 @@ metadata:
   name: ai-chatbot-config
   namespace: ai-chatbot
 data:
-  VERTEX_AI_LOCATION: "us-central1"
-  VERTEX_AI_MODEL: "gemini-2.5-flash"
+  VERTEX_AI_LOCATION: "global"          # overridden by deploy-app.sh (ConfigMap ai-chatbot-env)
+  VERTEX_AI_MODEL: "gemini-3.8-flash"     # overridden by deploy-app.sh (ConfigMap ai-chatbot-env)
   APP_PORT: "8080"
   APP_ENV: "demo"
   LOG_LEVEL: "INFO"

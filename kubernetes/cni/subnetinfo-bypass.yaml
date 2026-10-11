@@ -10,7 +10,7 @@
 #
 #  Symptom when missing: pods in ai-chatbot cannot reach the GCP metadata
 #  server (169.254.169.254) once CNI chaining is active → Workload Identity
-#  cannot mint a token → the app cannot call the Gemini API.
+#  cannot mint a token → the app cannot call Vertex AI (Gemini).
 #
 #  🔴 THE CR MUST LIVE IN THE POD'S OWN NAMESPACE.
 #  pan-cni 4.0.2 rejects cross-namespace references outright — a

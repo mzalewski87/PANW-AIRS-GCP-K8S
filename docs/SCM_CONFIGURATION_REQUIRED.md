@@ -69,7 +69,8 @@ If you have granular rules — add:
 | Security Profile | (optional) AI Security Profile |
 
 > ℹ️ **If any rule matches on FQDN or a URL category instead of IP**, note that the
-> chatbots call **`<region>-aiplatform.googleapis.com`** (Vertex AI), not
+> chatbots call **`aiplatform.googleapis.com`** (Vertex AI, `global` location —
+> `gemini-3.8-flash` is not served on regional hosts), not
 > `generativelanguage.googleapis.com`. The same applies to the decryption rule —
 > if it does not cover the Vertex host, AIRS sees only the SNI and inspects
 > nothing. Verify from a pod (the issuer must be the firewall's CA):
@@ -77,8 +78,8 @@ If you have granular rules — add:
 > ```bash
 > POD=$(kubectl get pod -n ai-chatbot -l app=ai-chatbot -o jsonpath='{.items[0].metadata.name}')
 > kubectl exec -n ai-chatbot "$POD" -- sh -c \
->   'echo | openssl s_client -connect us-central1-aiplatform.googleapis.com:443 \
->    -servername us-central1-aiplatform.googleapis.com 2>/dev/null | openssl x509 -noout -issuer'
+>   'echo | openssl s_client -connect aiplatform.googleapis.com:443 \
+>    -servername aiplatform.googleapis.com 2>/dev/null | openssl x509 -noout -issuer'
 > ```
 
 ---

@@ -41,7 +41,7 @@ PORTKEY_CONFIG = os.environ.get("PORTKEY_CONFIG", "")
 PORTKEY_PROVIDER = os.environ.get("PORTKEY_PROVIDER", "")
 # The anthropic. prefix selects publishers/anthropic on Vertex AI; a plain name
 # resolves to publishers/google and 404s. See docs/AI_GATEWAY_SETUP.md § 5.
-MODEL = os.environ.get("GW_MODEL", "anthropic.claude-haiku-4-5")
+MODEL = os.environ.get("GW_MODEL", "anthropic.claude-haiku-5-5")
 APP_LANG = os.environ.get("APP_LANG", "en")
 DOCUMENTS_DIR = Path(os.environ.get("DOCUMENTS_DIR", Path(__file__).parent / "documents"))
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "2"))

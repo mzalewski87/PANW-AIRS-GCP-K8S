@@ -66,14 +66,19 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # Configuration via env vars
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
-VERTEX_AI_LOCATION = os.getenv("VERTEX_AI_LOCATION", "us-central1")
-VERTEX_AI_MODEL = os.getenv("VERTEX_AI_MODEL", "gemini-2.5-flash")
+VERTEX_AI_LOCATION = os.getenv("VERTEX_AI_LOCATION", "global")
+VERTEX_AI_MODEL = os.getenv("VERTEX_AI_MODEL", "gemini-3.8-flash")
+# The global endpoint has no region prefix; current Gemini models are served only there.
+VERTEX_AI_HOST = (
+    "aiplatform.googleapis.com" if VERTEX_AI_LOCATION == "global"
+    else f"{VERTEX_AI_LOCATION}-aiplatform.googleapis.com"
+)
 APP_PORT = int(os.getenv("APP_PORT", "8080"))
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", T["system"]["default_system_prompt"])
 
 
 def call_gemini(prompt: str, history: list = None) -> str:
-    """Calls Gemini on Vertex AI (<region>-aiplatform.googleapis.com) with Workload Identity.
+    """Calls Gemini on Vertex AI (VERTEX_AI_HOST) with Workload Identity.
 
     NOT generativelanguage.googleapis.com. That endpoint rejects Workload Identity
     tokens with 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT: it wants the
@@ -93,7 +98,7 @@ def call_gemini(prompt: str, history: list = None) -> str:
         logger.info(f"{T['system']['log_sending_prompt']} [{VERTEX_AI_MODEL}]: {prompt[:100]}...")
 
         url = (
-            f'https://{VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1'
+            f'https://{VERTEX_AI_HOST}/v1'
             f'/projects/{GCP_PROJECT_ID}/locations/{VERTEX_AI_LOCATION}'
             f'/publishers/google/models/{VERTEX_AI_MODEL}:generateContent'
         )

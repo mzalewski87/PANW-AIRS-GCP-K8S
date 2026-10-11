@@ -43,9 +43,11 @@ gke_max_node_count = 4
 # ─────────────────────────────────────────
 # Vertex AI
 # ─────────────────────────────────────────
-vertex_ai_model         = "gemini-2.5-flash"   # ⚠️ Explicit version, not a "-latest" alias.
+vertex_ai_model         = "gemini-3.8-flash"   # ⚠️ Explicit version, not a "-latest" alias.
 #                                                Aliases like gemini-flash-latest exist only on
 #                                                generativelanguage.googleapis.com and 404 on Vertex AI.
+vertex_ai_location      = "global"             # ⚠️ NOT the cluster region. Gemini 3.x exists only on
+#                                                "global" (aiplatform.googleapis.com); us-central1 → 404.
 vertex_ai_endpoint_name = "airs-gemini-endpoint"
 
 # ─────────────────────────────────────────
@@ -109,10 +111,11 @@ portkey_gateway_url = "https://aigw.portkey.ai/v1"  # OpenAI-compatible gateway 
 #                                                     want the bare host (Claude Code's Anthropic
 #                                                     base URL is https://aigw.portkey.ai/ ) – this
 #                                                     app appends /chat/completions itself.
-gw_model            = "anthropic.claude-haiku-4-5"  # Claude Haiku on Vertex AI.
+gw_model            = "anthropic.claude-haiku-5-5"  # Claude Haiku on Vertex AI.
 #                                                     ⚠️ Two independent 404 causes:
-#                                                     1) the Portkey Vertex provider must point at us-east5
-#                                                        – Anthropic models are not served in us-central1;
+#                                                     1) the Portkey Vertex provider must point at "global"
+#                                                        – Anthropic models are not served in us-central1
+#                                                        (us-east5 may answer 429: zero default quota);
 #                                                     2) the anthropic. prefix selects publishers/anthropic
 #                                                        – a plain name builds publishers/google → 404.
 #                                                     Some providers want the plain name; try it if this 404s.

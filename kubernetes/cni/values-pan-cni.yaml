@@ -13,7 +13,9 @@
 #
 #  1. cniimage pinned to 4.0.2 — the chart ships `:latest`. A silent bump into
 #     an image that speaks a different CNI spec version takes every node
-#     NotReady at 3am. Pin it; upgrade deliberately.
+#     NotReady at 3am. Pin it; upgrade deliberately. 4.0.2 is the tested tag;
+#     4.0.3 is now `latest` (~2026-09-18) and, by static inspection only (not
+#     verified live), still does not implement the CNI STATUS verb.
 #
 #  2. fwtrustcidr — the chart ships it EMPTY. Set it to the firewall trust
 #     subnet (SCM's fw-trust-sub, 10.1.2.0/24 here). Read the live value from:
@@ -52,6 +54,8 @@ clusterid: 1
 # issues the CNI STATUS verb, which pan-cni answers with
 # `unknown CNI_COMMAND: STATUS` → NetworkPluginNotReady on every node it lands
 # on. Nodes <= 1.34 get `10-gke-ptp.conflist` at cniVersion 0.3.1 and work.
+# It is the NODE version that counts — a control plane auto-upgraded past the
+# threshold (unavoidable on GKE) is harmless while the node pool stays on 1.34.
 #
 # Without this selector the DaemonSet lands on EVERY node, including any 1.35+
 # pool, and takes down workloads that have nothing to do with Network Intercept

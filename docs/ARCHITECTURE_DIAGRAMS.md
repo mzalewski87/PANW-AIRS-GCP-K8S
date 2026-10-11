@@ -157,8 +157,8 @@
 │  │  │  │  │  │ │      │      │ │ │ │  │    │      │            │   │   │    │
 │  │  │  │  │  │ │      │      │ │ │ │  │    │      │            │   │   │    │
 │  │  │  │  │  │ │      ▼      │ │ │ │  ▼    ▼      │            │   │   │    │
-│  │  │  │  │  │ │  Gemini API │ │ │ │ AIRS  Gemini │            │   │   │    │
-│  │  │  │  │  │ │  (direct)   │ │ │ │ SDK   API    │            │   │   │    │
+│  │  │  │  │  │ │  Vertex AI  │ │ │ │ AIRS  Vertex │            │   │   │    │
+│  │  │  │  │  │ │  (Gemini)   │ │ │ │ SDK   AI     │            │   │   │    │
 │  │  │  │  │  │ └─────────────┘ │ │ │  │           │            │   │   │    │
 │  │  │  │  │  │                 │ │ │  │    MODE 2:│            │   │   │    │
 │  │  │  │  │  │  KSA:           │ │ │  │    API    │            │   │   │    │
@@ -184,7 +184,7 @@
 │  │  │  │  │  └─────────────────────────────────────────┘       │   │   │    │
 │  │  │  │  └────────────────────────────────────────────────────┘   │   │    │
 │  │  │  │                                                           │   │    │
-│  │  │  │  Cloud NAT ──► Internet (Gemini API, SCP API)             │   │    │
+│  │  │  │  Cloud NAT ──► Internet (Vertex AI (Gemini), SCP API)     │   │    │
 │  │  │  │                                                           │   │    │
 │  │  │  └───────────────────────────────────────────────────────────┘   │    │
 │  │  │                                                                  │    │
@@ -200,8 +200,8 @@
 │  │  │  │                                └────────────────────┘     │   │    │
 │  │  │  │                                                           │   │    │
 │  │  │  │  ┌────────────┐ ┌────────────┐ ┌────────────────────┐     │   │    │
-│  │  │  │  │ Cloud      │ │ Workload   │ │ Gemini AI API      │     │   │    │
-│  │  │  │  │ Build      │ │ Identity   │ │ (generativelang.   │     │   │    │
+│  │  │  │  │ Cloud      │ │ Workload   │ │ Vertex AI (Gemini) │     │   │    │
+│  │  │  │  │ Build      │ │ Identity   │ │ (aiplatform.       │     │   │    │
 │  │  │  │  │ (CI/CD)    │ │ Federation │ │  googleapis.com)   │     │   │    │
 │  │  │  │  └────────────┘ └────────────┘ └────────────────────┘     │   │    │
 │  │  │  └───────────────────────────────────────────────────────────┘   │    │
@@ -277,7 +277,7 @@
            ▼                                                       │
   ┌──────────────┐                                                 │
   │  GKE Pod     │                                                 │
-  │  ai-chatbot  │ 5. Call Gemini API ─────────────────────────────►
+  │  ai-chatbot  │ 5. Call Vertex AI (Gemini) ─────────────────────►
   │              │◄──────────────────────────── 6. AI Response ────┘
   └──────┬───────┘
          │ 7. Response back through Firewall
@@ -345,7 +345,7 @@
   │               │ NO (allow)                                     │
   │               ▼                                                │
   │  3. ┌────────────────────┐                                     │
-  │     │  Call Gemini       │────► <region>-aiplatform.googleapis │
+  │     │  Call Gemini       │────► aiplatform.googleapis.com      │
   │     │  (REST + OAuth)    │◄──── AI Response                    │
   │     └────────┬───────────┘                                     │
   │              │                                                 │
@@ -406,7 +406,7 @@
   │        │                                                       │
   │        ▼ pass                                                  │
   │  ┌──────────────────────────────────────────────┐              │
-  │  │  Vertex AI · Claude Haiku  (us-east5)        │              │
+  │  │  Vertex AI · Claude Haiku  (global)          │              │
   │  │  ⚠️ NOT us-central1 – Anthropic models 404   │              │
   │  └───────────────────┬──────────────────────────┘              │
   │                      │                                         │

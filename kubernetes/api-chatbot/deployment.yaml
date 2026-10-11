@@ -30,8 +30,8 @@ metadata:
   name: api-chatbot-config
   namespace: ai-api-chatbot
 data:
-  GCP_LOCATION: "us-central1"
-  VERTEX_AI_MODEL: "gemini-2.5-flash"
+  GCP_LOCATION: "global"                 # overridden by deploy-app.sh (ConfigMap api-chatbot-env)
+  VERTEX_AI_MODEL: "gemini-3.8-flash"     # overridden by deploy-app.sh (ConfigMap api-chatbot-env)
   AIRS_API_ENDPOINT: "__AIRS_ENDPOINT__"
   AIRS_SECURITY_PROFILE_NAME: "__AIRS_PROFILE__"
 ---
@@ -96,6 +96,21 @@ spec:
                 configMapKeyRef:
                   name: api-chatbot-env
                   key: GCP_PROJECT_ID
+                  optional: true
+            # Vertex location + model – set by deploy-app.sh from terraform outputs
+            # (vertex_ai_location / vertex_ai_model_id). `env` beats `envFrom`, so these
+            # win over the defaults in api-chatbot-config.
+            - name: GCP_LOCATION
+              valueFrom:
+                configMapKeyRef:
+                  name: api-chatbot-env
+                  key: GCP_LOCATION
+                  optional: true
+            - name: VERTEX_AI_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: api-chatbot-env
+                  key: VERTEX_AI_MODEL
                   optional: true
             # AIRS API Key – pulled from a Kubernetes Secret
             # The secret must exist before the deployment!

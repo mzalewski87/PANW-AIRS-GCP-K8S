@@ -88,9 +88,19 @@ variable "gke_max_node_count" {
 # The moving aliases (gemini-flash-latest, gemini-pro-latest) exist only on
 # generativelanguage.googleapis.com and 404 on Vertex – pin an explicit version.
 variable "vertex_ai_model" {
-  description = "Vertex AI model (Gemini) to use – an explicit version, e.g. gemini-2.5-flash"
+  description = "Vertex AI model (Gemini) to use – an explicit version, e.g. gemini-3.8-flash. Passed to both chatbots by deploy-app.sh."
   type        = string
-  default     = "gemini-2.5-flash"
+  default     = "gemini-3.8-flash"
+}
+
+# ⚠️ Not the same thing as `region`. Gemini 3.x is served ONLY on the "global"
+# location (host aiplatform.googleapis.com, no region prefix) – a regional value
+# such as us-central1 returns 404 for it. Use a region only for a model that is
+# actually published there (e.g. gemini-2.5-*, retired on 2026-10-20).
+variable "vertex_ai_location" {
+  description = "Vertex AI location the chatbots call: \"global\" (default) or a region that serves vertex_ai_model"
+  type        = string
+  default     = "global"
 }
 
 variable "vertex_ai_endpoint_name" {
@@ -205,8 +215,9 @@ variable "portkey_gateway_url" {
   default     = "https://aigw.portkey.ai/v1"
 }
 
-# Claude on Vertex AI is only served from a subset of regions – us-east5 for
-# the Anthropic models, NOT us-central1 (which 404s). The region is configured
+# Claude on Vertex AI is not served in us-central1 (404). Point the Portkey
+# provider at the "global" location – a regional endpoint such as us-east5 may
+# serve the model but with zero default quota (429). The location is configured
 # on the Portkey provider, not here; this is only the model name the app asks for.
 #
 # The `anthropic.` prefix is not cosmetic: Portkey maps the model name onto a
@@ -217,7 +228,7 @@ variable "portkey_gateway_url" {
 variable "gw_model" {
   description = "Model name requested through the AI Gateway (Claude Haiku on Vertex AI). The anthropic. prefix selects publishers/anthropic – see docs/AI_GATEWAY_SETUP.md § 5."
   type        = string
-  default     = "anthropic.claude-haiku-4-5"
+  default     = "anthropic.claude-haiku-5-5"
 }
 
 # ─────────────────────────────────────────

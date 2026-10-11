@@ -73,6 +73,11 @@ output "vertex_ai_model_id" {
   value       = module.vertex_ai.model_id
 }
 
+output "vertex_ai_location" {
+  description = "Vertex AI location the chatbots call (global → aiplatform.googleapis.com)"
+  value       = var.vertex_ai_location
+}
+
 output "artifact_registry_url" {
   description = "Artifact Registry repository URL"
   value       = module.vertex_ai.artifact_registry_url

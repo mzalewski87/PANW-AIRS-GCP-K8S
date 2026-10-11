@@ -70,8 +70,11 @@ T = load_translations(APP_LANG)
 app = Flask(__name__)
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
-LOCATION   = os.environ.get("GCP_LOCATION", "us-central1")
-MODEL_ID   = os.environ.get("VERTEX_AI_MODEL", "gemini-2.5-flash")
+LOCATION   = os.environ.get("GCP_LOCATION", "global")
+MODEL_ID   = os.environ.get("VERTEX_AI_MODEL", "gemini-3.8-flash")
+# The global endpoint has no region prefix; current Gemini models are served only there.
+VERTEX_HOST = ("aiplatform.googleapis.com" if LOCATION == "global"
+               else f"{LOCATION}-aiplatform.googleapis.com")
 
 # AIRS configuration
 AIRS_API_KEY             = os.environ.get("AIRS_API_KEY", "")
@@ -103,7 +106,7 @@ else:
 
 
 # ─────────────────────────────────────────
-# Gemini on Vertex AI (<region>-aiplatform.googleapis.com)
+# Gemini on Vertex AI (VERTEX_HOST – aiplatform.googleapis.com for location "global")
 #
 # NOT generativelanguage.googleapis.com. That endpoint rejects Workload Identity
 # tokens with 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT: it wants the
@@ -127,7 +130,7 @@ def call_gemini(prompt: str) -> str:
     try:
         token = _get_gemini_token()
         url = (
-            f'https://{LOCATION}-aiplatform.googleapis.com/v1'
+            f'https://{VERTEX_HOST}/v1'
             f'/projects/{PROJECT_ID}/locations/{LOCATION}'
             f'/publishers/google/models/{MODEL_ID}:generateContent'
         )

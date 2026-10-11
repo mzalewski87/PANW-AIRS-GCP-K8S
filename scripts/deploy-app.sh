@@ -43,6 +43,10 @@ fi
 REGION=$(terraform output -raw region 2>/dev/null || echo "us-central1")
 CLUSTER_NAME=$(terraform output -raw gke_cluster_name 2>/dev/null || echo "airs-ai-cluster")
 REGISTRY_URL=$(terraform output -raw artifact_registry_url 2>/dev/null || echo "${REGION}-docker.pkg.dev/${PROJECT_ID}/airs-ai-chatbot")
+# Vertex AI endpoint is independent of the cluster region: current Gemini models are
+# served only on the "global" location (aiplatform.googleapis.com, no region prefix).
+VERTEX_LOCATION=$(terraform output -raw vertex_ai_location 2>/dev/null || echo "global")
+VERTEX_MODEL=$(terraform output -raw vertex_ai_model_id 2>/dev/null || echo "gemini-3.8-flash")
 
 # Pull allowed_mgmt_cidrs from terraform output or terraform.tfvars
 ALLOWED_CIDRS_RAW=$(terraform output -json 2>/dev/null | python3 -c "
@@ -164,7 +168,8 @@ EOF
 kubectl create configmap ai-chatbot-env \
   --namespace=ai-chatbot \
   --from-literal=GCP_PROJECT_ID="$PROJECT_ID" \
-  --from-literal=VERTEX_AI_LOCATION="$REGION" \
+  --from-literal=VERTEX_AI_LOCATION="$VERTEX_LOCATION" \
+  --from-literal=VERTEX_AI_MODEL="$VERTEX_MODEL" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # ─────────────────────────────────────────
@@ -282,7 +287,8 @@ EOF
 kubectl create configmap api-chatbot-env \
   --namespace=ai-api-chatbot \
   --from-literal=GCP_PROJECT_ID="$PROJECT_ID" \
-  --from-literal=GCP_LOCATION="$REGION" \
+  --from-literal=GCP_LOCATION="$VERTEX_LOCATION" \
+  --from-literal=VERTEX_AI_MODEL="$VERTEX_MODEL" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # AIRS API Key – create K8s Secret (BEFORE deployment!)

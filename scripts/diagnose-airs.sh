@@ -10,7 +10,7 @@
 #  5. ELB/ILB health checks (port, requestPath)
 #  6. Backend services health (HEALTHY/UNHEALTHY)
 #  7. GKE: namespace annotations, pan-cni daemonset, pod IPs, helm release
-#  8. Connectivity test from a pod to Gemini API + AIRS API
+#  8. Connectivity test from a pod to Vertex AI (Gemini) + AIRS API
 #
 #  Read-only – modifies nothing. Safe to run at any time.
 #
@@ -416,7 +416,7 @@ except: pass" 2>/dev/null)
 
 if [ -n "$POD" ]; then
   echo "  Pod: $POD (Ready)"
-  for HOST in us-central1-aiplatform.googleapis.com service.api.aisecurity.paloaltonetworks.com; do
+  for HOST in aiplatform.googleapis.com service.api.aisecurity.paloaltonetworks.com; do
     RESULT=$(kubectl exec -n ai-chatbot "$POD" -- timeout 5 curl -sko /dev/null -w "%{http_code}/%{time_total}s" -I "https://$HOST" 2>/dev/null || echo "TIMEOUT")
     echo "    $HOST → $RESULT"
   done
