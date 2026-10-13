@@ -59,6 +59,11 @@ The third mode needs **no GCP infrastructure at all** — it is a good fallback
 demo when the firewall stack is unavailable. Setup:
 [docs/AI_GATEWAY_SETUP.md](docs/AI_GATEWAY_SETUP.md).
 
+**Optional — AI Red Teaming against all three.** A Network Channel client in the cluster
+lets Prisma AIRS AI Red Teaming attack the chatbots at their in-cluster addresses, with no
+inbound exposure. Install, target settings (request/response JSON, rate limits, block
+codes 500 / 403 / 446): [DEPLOYMENT_GUIDE § 11a](docs/DEPLOYMENT_GUIDE.md#11a-phase-10--ai-red-teaming-via-network-channel-optional).
+
 ## Repository layout
 
 ```

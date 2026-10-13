@@ -475,6 +475,11 @@ AIRS profile is the whole indirect-injection story.
 > attacks come back 246 instead of 446, the guardrail's action is set to allow —
 > the demo will look like a failure even though detection worked.
 
+These are the **gateway's** codes. `gw-chatbot`'s own `POST /api/chat` passes the block
+through: a guardrail block returns **HTTP 446** with `"blocked": true` (earlier versions
+returned 200), everything else 200 — or 502 when the gateway itself errors. That is what
+AI Red Teaming keys on — see DEPLOYMENT_GUIDE § 11a.
+
 ### The MCP server
 
 `kubernetes/gw-chatbot/mcp_server.py` speaks MCP over stdio (JSON-RPC 2.0) and

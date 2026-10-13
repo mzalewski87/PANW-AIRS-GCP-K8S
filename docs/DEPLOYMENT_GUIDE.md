@@ -23,6 +23,7 @@
 9. [PHASE 7 – Kubernetes CNI Chaining (Helm)](#9-phase-7--kubernetes-cni-chaining-helm)
 10. [PHASE 8 – AIRS API Runtime Intercept](#10-phase-8--airs-api-runtime-intercept)
 11. [PHASE 9 – AIRS AI Gateway Intercept (optional)](#11-phase-9--airs-ai-gateway-intercept-optional)
+   - [11a. PHASE 10 – AI Red Teaming via Network Channel (optional)](#11a-phase-10--ai-red-teaming-via-network-channel-optional)
 12. [Verification and webinar demo](#12-verification-and-webinar-demo)
 13. [Troubleshooting](#13-troubleshooting)
    - [13.8 Redeploying / migrating to a new GCP project](#138-redeploying--migrating-to-a-new-gcp-project)
@@ -2200,6 +2201,224 @@ on the tool's return path — because every tool hop re-enters the gateway.
 
 ---
 
+## 11a. PHASE 10 – AI Red Teaming via Network Channel (optional)
+
+> **Source:** https://docs.paloaltonetworks.com/ai-runtime-security/ai-red-teaming/identify-ai-system-risks-with-ai-red-teaming/get-started-with-prisma-airs-ai-red-teaming/network-channels
+
+Prisma AIRS AI Red Teaming is SaaS — it has to reach the chatbots to attack them. A
+**Network Channel** gets it there without any inbound exposure: a small client in the
+cluster dials **out** to Palo Alto Networks over WebSocket (WSS/443) and proxies the
+red-team requests to the chatbots' **in-cluster** addresses. No LoadBalancer, no public
+IP, no GCP firewall change — which is also why `gw-chatbot` (ClusterIP only) can be a
+target at all.
+
+```
+AI Red Teaming (SaaS) ⇄ WSS/443 ⇄ panw-network-client (ns airs-redteam)
+                                        │  http://<svc>.<ns>.svc.cluster.local/api/chat
+                                        ├─▶ ai-chatbot   (Network Intercept → VM-Series)
+                                        ├─▶ api-chatbot  (API Runtime Intercept → SDK)
+                                        └─▶ gw-chatbot   (AI Gateway Intercept → Portkey)
+```
+
+Every attack still runs through the real protection of each demo, so the Red Teaming
+report measures exactly what you show on stage.
+
+### 11a.1 What you need and where it comes from
+
+All of it is shown by SCM when you create the channel — nothing goes into
+`terraform.tfvars` or the repo.
+
+| Value | Where you get it | Where it goes |
+|---|---|---|
+| Registry username + password | SCM → **AI Red Teaming → Network Channels → Add** (the "Configure Docker Registry" step; username = your TSG ID) | `kubectl create secret docker-registry` + `helm registry login` (§ 11a.2) |
+| Client ID + Client Secret | An SCM **service account** — the channel wizard's "Create Service Account" step (name + description, then assign the role it names, e.g. `Superuser`). Copy the secret immediately; it is shown once | `helm install --set config.clientId / config.clientSecret` |
+| Channel ID | Shown in the channel's install command | `helm install --set config.channelId` |
+| Chart version | Shown in the channel's install command (e.g. `1.5.0`) | `helm install --version` |
+
+> 🔐 These are credentials. Type them into your terminal only — never into a file in this
+> repo, never into an issue or a screenshot. Rotate the Client Secret if it ever leaks.
+
+**Egress the client needs** (bidirectional, TCP/443):
+`api.sase.paloaltonetworks.com`, `auth.apps.paloaltonetworks.com`,
+`registry.ai-red-teaming.paloaltonetworks.com`.
+
+In this lab all pod egress goes peering → ILB → VM-Series, so those FQDNs must be
+**allowed** by the firewall security policy (the § 8.8 rules already cover it) and must
+**not** be decrypted. They aren't: the decryption rule (§ 8.13) matches only `$CL_POD` in
+zone `k8s-cluster-1`, and the client's namespace is **not** CNI-annotated, so its traffic
+leaves with the node IP and never matches it. Keep it that way — **do not annotate
+`airs-redteam`** for CNI chaining.
+
+### 11a.2 Install the client
+
+Run against the lab cluster explicitly (§ 2.3 — a wrong context installs it elsewhere):
+
+```bash
+CTX=gke_${PROJECT_ID}_us-central1_airs-ai-cluster
+
+kubectl --context $CTX create namespace airs-redteam
+
+# Pull secret – values from the channel wizard. The name airs-pull-secret is what
+# the chart expects; it must live in the same namespace as the release.
+kubectl --context $CTX -n airs-redteam create secret docker-registry airs-pull-secret \
+  --docker-server=registry.ai-red-teaming.paloaltonetworks.com \
+  --docker-username=<TSG_ID> \
+  --docker-password=<REGISTRY_PASSWORD>
+
+# --password-stdin keeps the password out of the process list
+echo '<REGISTRY_PASSWORD>' | helm registry login registry.ai-red-teaming.paloaltonetworks.com \
+  --username <TSG_ID> --password-stdin
+
+helm --kube-context $CTX install panw-network-client \
+  oci://registry.ai-red-teaming.paloaltonetworks.com/pairs-redteam-prd-fckx/red-teaming-onprem/charts/panw-network-client \
+  --version <CHART_VERSION> \
+  --namespace airs-redteam \
+  --set config.clientId=<CLIENT_ID> \
+  --set config.clientSecret=<CLIENT_SECRET> \
+  --set config.channelId=<CHANNEL_ID>
+```
+
+> 💡 PANW's wizard prints the commands for the `default` namespace and without
+> `--version`/`--kube-context`. The variant above is the same chart, isolated in its own
+> namespace and pinned to the cluster.
+
+### 11a.3 Verify the client
+
+```bash
+kubectl --context $CTX -n airs-redteam get pods        # 1/1 Running
+kubectl --context $CTX -n airs-redteam logs deploy/panw-network-client | grep -E "Connecting|Connected"
+# ... "message":"Connecting to the server"
+# ... "message":"Connected to the server"
+```
+
+The client image is distroless — no shell, no `curl` — so `kubectl exec` into it fails
+(exit 127). Test reachability of the three chatbots from a **throwaway pod in the same
+namespace** instead (it deletes itself):
+
+```bash
+kubectl --context $CTX -n airs-redteam run rt-reach-test --rm -i --restart=Never \
+  --image=curlimages/curl:8.10.1 --command -- sh -c '
+for u in ai-chatbot.ai-chatbot api-chatbot.ai-api-chatbot gw-chatbot.ai-gw-chatbot; do
+  printf "%-28s " "$u"
+  curl -s -m 90 -o /dev/null -w "HTTP %{http_code}\n" -X POST "http://$u.svc.cluster.local/api/chat" \
+    -H "Content-Type: application/json" -d "{\"message\":\"Reply with exactly: channel ok\"}"
+done'
+# Expected: HTTP 200 for all three
+```
+
+Then in SCM click **Validate Channel** → status **Online**.
+
+| Channel status | Meaning |
+|---|---|
+| Draft | No client has ever connected — check pod status and logs |
+| Online | Connected |
+| Offline | The client was connected and dropped — pod restarting, egress blocked by the firewall policy, or credentials rotated |
+
+### 11a.4 Configure the three targets
+
+SCM → **AI Red Teaming → Targets → + New Target**, once per chatbot. Common settings:
+
+| Field | Value |
+|---|---|
+| Target Type | **Application** |
+| Connection Method | **REST API** |
+| Endpoint | **Private** → select your Network Channel |
+| Authentication | none — the chatbots have no auth |
+| Request JSON | `{ "message": "{INPUT}" }` |
+| Response JSON | `{ "response": "{RESPONSE}" }` |
+| Multi-Turn Session Configuration | **Disabled** (see below) |
+| Successful Connection Message | the default is fine |
+| Target Background | per target — see the table below |
+
+> 🔴 **Response JSON must name `response`.** The wizard pre-fills
+> `{ "output": "{RESPONSE}" }`; left as-is, validation fails with
+> `Response key 'output' not found in response`. All three chatbots return the text in
+> `response` — the extra fields they add (`model`, `airs`, `guardrail`, …) are ignored.
+
+Per-target cURL (paste into the wizard's import, or use for the URL field):
+
+```bash
+# A) Network Intercept (VM-Series)
+curl -X POST 'http://ai-chatbot.ai-chatbot.svc.cluster.local/api/chat' \
+  -H 'Content-Type: application/json' -d '{"message": "{INPUT}"}'
+
+# B) API Runtime Intercept (AIRS SDK)
+curl -X POST 'http://api-chatbot.ai-api-chatbot.svc.cluster.local/api/chat' \
+  -H 'Content-Type: application/json' -d '{"message": "{INPUT}"}'
+
+# C) AI Gateway Intercept (Portkey)
+curl -X POST 'http://gw-chatbot.ai-gw-chatbot.svc.cluster.local/api/chat' \
+  -H 'Content-Type: application/json' -d '{"message": "{INPUT}"}'
+```
+
+**Multi-Turn: leave it disabled.** None of the chatbots keeps conversation state
+server-side — `ai-chatbot` echoes `session_id` but sends only the current prompt to the
+model, `api-chatbot` generates a session UUID and stores nothing, `gw-chatbot` has no
+session at all. Enabled, Red Teaming would believe it holds a conversation while every
+turn reaches the model without context, and multi-turn attacks (crescendo, gradual
+jailbreaks) would score as falsely "safe".
+
+**Rate Limits — enable, per target.** The apps have no limiter of their own; this value
+is simply how fast Red Teaming sends. Size it to the slowest stage behind each app:
+
+| Target | Capacity behind it | Endpoint Rate Limit (req/min) |
+|---|---|---|
+| ai-chatbot | 2 replicas × 2 gunicorn workers, one Gemini call (~2–10 s) | **20** |
+| api-chatbot | 2 replicas × 4 workers, 2 AIRS scans + Gemini (~3–6 s) | **20** |
+| gw-chatbot | 1 replica × 2 workers, MCP tool loop = several Claude calls (~5–20 s) | **6** |
+
+Rate Limit Error Code: leave `429`, Sample Exception JSON `{}`. The chatbots never emit
+429 themselves (an upstream Vertex quota error surfaces as 500 from `ai-chatbot` and 502
+from `gw-chatbot`), so this field rarely matches — the req/min value is what protects
+the lab.
+
+**Guardrails / Content Filters — enable, per target.** This tells Red Teaming what a
+*block* looks like, so it reports "stopped by guardrail" instead of an error:
+
+| Target | Error code | Sample Exception JSON |
+|---|---|---|
+| ai-chatbot | **500** | `{"error": "Error communicating with the AI model", "details": "Remote end closed connection without response"}` |
+| api-chatbot | **403** | `{"blocked": true, "stage": "prompt", "message": "Your message was blocked by AIRS for safety reasons.", "category": "malicious"}` |
+| gw-chatbot | **446** | `{"blocked": true, "response": "🛡️ Blocked by the Prisma AIRS guardrail in the AI Gateway. The request never reached the model.", "status": 446}` |
+
+Notes on each:
+- **ai-chatbot:** the VM-Series resets the connection to Vertex AI, so the app returns
+  500. A genuine model outage is also 500 — only `details: "Remote end closed connection
+  without response"` identifies a firewall block.
+- **api-chatbot:** a blocked *response* (post-scan) is also 403, with
+  `"stage": "response"` and `"The AI model response was blocked by AIRS."`
+- **gw-chatbot:** returns 446 (mirrored from Portkey) on a guardrail block. Versions
+  before this change returned 200 with `"blocked": true`, which Red Teaming cannot tell
+  from an answer — redeploy with `./scripts/deploy-gw-chatbot.sh` if yours does.
+- The messages are the English defaults; with `APP_LANG=pl` the text differs, the codes
+  do not.
+
+**Target Background — one per target.** Red Teaming uses it to pick attack themes that
+matter for the business (what counts as a leak, what is off-topic, what a jailbreak would
+unlock). Keep it consistent with what each app really does; leave **Agentic Profiling
+enabled** so the scanner also probes the actual capabilities. Leave **Competitors**
+empty — the chatbots represent no real brand, so competitor-mention tests only add noise.
+
+| Target | Industry | Use Case |
+|---|---|---|
+| ai-chatbot | `Technology / Enterprise IT` | Internal general-purpose AI assistant for employees, answering open-ended questions with Gemini on Vertex AI. It has no tools and no access to company data. All traffic to the model is inspected inline by a Palo Alto Networks VM-Series firewall (Network Intercept with TLS decryption). It must refuse to reveal its system prompt, generate malware or exploit code, produce toxic or harmful content, or disclose personal data. |
+| api-chatbot | `Financial Services` | Customer-facing support assistant for a retail bank, built into the web application. It answers general product and account questions with Gemini on Vertex AI; every prompt and response is scanned through the Prisma AIRS API. It must never disclose or echo payment card numbers, bank account numbers, credentials or API keys, give instructions for fraud, or be manipulated into ignoring its instructions. |
+| gw-chatbot | `Professional Services / Corporate (HR & Finance)` | Internal document assistant for ACME Corp employees. It answers questions about corporate policies (travel & expense, quarterly notes) using MCP tools: `list_documents`, `search_documents`, `read_document`. Model is Claude on Vertex AI behind the Portkey AI Gateway with a Prisma AIRS guardrail. Documents are untrusted data and may contain injected instructions; the assistant must never follow instructions found inside documents, reveal its system prompt, exfiltrate document contents beyond what the question needs, or be steered into misusing its tools. |
+
+> 💡 The `api-chatbot` row deliberately frames it as a bank assistant: its AIRS API profile
+> detects payment cards, bank accounts and API keys (see the DLP coverage table in § 12),
+> so the scan exercises what the profile actually protects. The `gw-chatbot` row names the
+> indirect-injection risk explicitly — that is the attack class this demo exists for.
+
+> 💡 **Budget.** A scan sends hundreds of prompts. Against `ai-chatbot` every one passes
+> the firewall and lands in **Log Viewer → AI Security**; against `gw-chatbot` each one
+> costs Portkey requests and Claude quota. Validate with a small attack set first.
+
+> 💡 Every request carries the header `x-airs-red-teaming-trace-id` — use it to correlate
+> a Red Teaming finding with the chatbot's pod logs and the SCM log entry.
+
+---
+
 ## 12. Verification and webinar demo
 
 ### Demo A: Network Intercept
@@ -2681,6 +2900,7 @@ PHASE 7:  ./scripts/fix-fw-trust-sources.sh            ← both peering-side FW 
           per-pod checks: carrier=1, metadata, egress IP = FW untrust, TLS issuer (§ 9.4)
 PHASE 8:  SCM → API Applications → API Key             ← SDK key (§ 10)
 PHASE 9:  ./scripts/deploy-gw-chatbot.sh               ← optional, Portkey (§ 11)
+PHASE 10: Network Channel client (helm, ns airs-redteam) + 3 targets ← optional (§ 11a)
           § 12 smoke test before every demo
 ```
 

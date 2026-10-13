@@ -199,7 +199,8 @@ def chat():
                     "tool_trace": tool_trace,
                     "status": status,
                 }
-            )
+            ), STATUS_GUARDRAIL_BLOCKED  # 446, mirrored from Portkey so callers (e.g.
+            # AI Red Teaming's Guardrails error code) can tell a block from an answer.
 
         if status not in (200, STATUS_GUARDRAIL_FAILED_ALLOWED):
             log.error("Gateway error %s: %s", status, str(payload)[:400])
