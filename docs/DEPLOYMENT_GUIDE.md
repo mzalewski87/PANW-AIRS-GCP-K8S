@@ -2326,6 +2326,7 @@ SCM → **AI Red Teaming → Targets → + New Target**, once per chatbot. Commo
 | Authentication | none — the chatbots have no auth |
 | Request JSON | `{ "message": "{INPUT}" }` |
 | Response JSON | `{ "response": "{RESPONSE}" }` |
+| Supports Sessions (API Details) | **No** (see below) |
 | Multi-Turn Session Configuration | **Disabled** (see below) |
 | Successful Connection Message | the default is fine |
 | Target Background | per target — see the table below |
@@ -2351,7 +2352,7 @@ curl -X POST 'http://gw-chatbot.ai-gw-chatbot.svc.cluster.local/api/chat' \
   -H 'Content-Type: application/json' -d '{"message": "{INPUT}"}'
 ```
 
-**Multi-Turn: leave it disabled.** None of the chatbots keeps conversation state
+**Supports Sessions = No, Multi-Turn disabled.** None of the chatbots keeps conversation state
 server-side — `ai-chatbot` echoes `session_id` but sends only the current prompt to the
 model, `api-chatbot` generates a session UUID and stores nothing, `gw-chatbot` has no
 session at all. Enabled, Red Teaming would believe it holds a conversation while every
