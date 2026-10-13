@@ -6,6 +6,14 @@
 > see the real pod IPs (10.100.x.x) and will not be able to route traffic from
 > pods or NAT it on egress.
 
+> 🔴 **Prerequisite — Traffic Object.** With pan-cni, pod traffic arrives as VXLAN and is
+> placed in the zone **`k8s-cluster-1`** by the Traffic Object, which references the
+> folder-scoped Logical Router `airs-lr`. Both are created in DEPLOYMENT_GUIDE § 8.5a.
+> Every rule below that matches pod traffic must therefore include source zone
+> **`k8s-cluster-1`** (next to `trust`). An empty Logical Router on the Traffic Object
+> fails the Push with `traffic_obj: parse: virtual-router is not set`
+> (TROUBLESHOOTING § 31).
+
 ---
 
 ## 1. Static Routes for Pod/Service CIDR
@@ -20,6 +28,8 @@ Edit the existing Logical Router (e.g. `airs-lr`) and add two static routes:
 | `10.200.0.0/20` (GKE Service CIDR) | `ethernet1/2` (trust) | Gateway from DHCP eth1/2 | Traffic to K8s services |
 
 > 💡 You will find the gateway IP in: Device Management → [firewall] → Interfaces → eth1/2 → DHCP Runtime Info.
+> It is always the first usable address of the trust subnet (`10.1.2.1` for `10.1.2.0/24`),
+> identical on every firewall — so the LR can stay in the folder scope.
 >
 > The route `10.0.0.0/8` (if it exists from section 8.5) covers both CIDRs.
 > If you have it — additional routes are NOT needed.
@@ -38,14 +48,14 @@ Add a NAT rule ABOVE the existing `outbound` rule:
 | Rule Name | `pods-outbound` |
 | Position | Pre-Rule (ABOVE `outbound`) |
 | **Original Packet** | |
-| Source Zone | `trust` |
+| Source Zone | `trust`, `k8s-cluster-1` |
 | Source Address | `10.100.0.0/16`, `10.200.0.0/20` |
 | Destination Zone | `untrust` |
 | **Translated Packet** | |
 | Source Translation | Dynamic IP and Port (DIPP) |
 | Interface | `ethernet1/1` (untrust) |
 
-> 💡 If the existing `outbound` rule (from section 8.6) has Source Address = `any`,
+> 💡 If the existing `outbound` / `PODs2Internet` rule (DEPLOYMENT_GUIDE § 8.7a) has Source Address = `any`,
 > it also covers traffic from pods. In that case the additional NAT rule is NOT needed.
 > Check your `outbound` rule — if Source = `any` → skip this step.
 
@@ -62,7 +72,7 @@ If you have granular rules — add:
 | Parameter | Value |
 |---|---|
 | Name | `allow-pods-outbound` |
-| Source Zone | `trust` |
+| Source Zone | `trust`, `k8s-cluster-1` |
 | Source Address | `10.100.0.0/16` |
 | Destination Zone | `untrust` |
 | Action | Allow |

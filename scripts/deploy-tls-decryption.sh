@@ -69,6 +69,21 @@ if ! grep -q "BEGIN CERTIFICATE" "$CA_FILE"; then
   exit 1
 fi
 
+# ─────────────────────────────────────────
+# 🔴 Context guard: unlike the other deploy scripts this one does NOT run
+# get-credentials, so it acts on kubectl's CURRENT context. On a workstation
+# (or project) with other clusters that may not be airs-ai-cluster.
+# Override with ALLOW_ANY_CONTEXT=1 if your cluster has a different name.
+# ─────────────────────────────────────────
+CTX=$(kubectl config current-context 2>/dev/null || echo "")
+if [[ "$CTX" != *airs-ai-cluster* ]] && [ "${ALLOW_ANY_CONTEXT:-0}" != "1" ]; then
+  echo "❌ kubectl current context is '$CTX', not airs-ai-cluster."
+  echo "   Switch first: gcloud container clusters get-credentials airs-ai-cluster --region <region> --project <project>"
+  echo "   (or re-run with ALLOW_ANY_CONTEXT=1 if your cluster is named differently)"
+  exit 1
+fi
+echo "🔑 kubectl context: $CTX"
+
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Uploading AIRS Root CA to GKE (ai-chatbot only)             ║"
@@ -178,10 +193,15 @@ kubectl rollout status deployment/ai-chatbot -n ai-chatbot --timeout=120s 2>/dev
 # ─────────────────────────────────────────
 echo ""
 echo "🔍 Verifying the CA bundle inside the pod..."
-POD=$(kubectl get pods -n ai-chatbot -l app=ai-chatbot -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+# Newest pod only: right after the rollout an old, terminating replica (no CA mount)
+# can still be listed first, which used to report a false "not found".
+POD=$(kubectl get pods -n ai-chatbot -l app=ai-chatbot --field-selector=status.phase=Running \
+  --sort-by=.metadata.creationTimestamp -o name 2>/dev/null | tail -1)
+POD=${POD#pod/}
 if [ -n "$POD" ]; then
-  COUNT=$(kubectl exec -n ai-chatbot "$POD" -- \
-    grep -c "BEGIN CERTIFICATE" /etc/ssl/airs/ca-bundle.crt 2>/dev/null || echo 0)
+  COUNT=$(kubectl exec -n ai-chatbot "$POD" -c ai-chatbot -- \
+    grep -c "BEGIN CERTIFICATE" /etc/ssl/airs/ca-bundle.crt 2>/dev/null || true)
+  COUNT=${COUNT:-0}
   # A bundle holding only the AIRS CA means the public roots were lost, which
   # breaks every request the firewall is NOT decrypting.
   if [ "$COUNT" -gt 1 ]; then

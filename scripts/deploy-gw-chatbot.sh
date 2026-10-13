@@ -314,21 +314,34 @@ echo "✅ GW Chatbot (AI Gateway Intercept) deployed!"
 # ─────────────────────────────────────────
 echo ""
 echo "🔍 Verifying the gateway wiring..."
-POD=$(kubectl get pod -n "$NAMESPACE" -l app=gw-chatbot \
-  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+# Newest Running pod only: right after `rollout restart` the old, terminating
+# replica can still be listed first, and exec into it made this check report
+# "/ready → 000" and "Documents: ?" on a perfectly healthy deployment.
+POD=$(kubectl get pod -n "$NAMESPACE" -l app=gw-chatbot --field-selector=status.phase=Running \
+  --sort-by=.metadata.creationTimestamp -o name 2>/dev/null | tail -1)
+POD=${POD#pod/}
+in_pod_get() {  # $1 = path; prints "<status> <body>"
+  kubectl exec -n "$NAMESPACE" "$POD" -- python3 -c '
+import sys, urllib.request, urllib.error
+try:
+    r = urllib.request.urlopen("http://127.0.0.1:8080" + sys.argv[1], timeout=20)
+    print(r.status, r.read().decode())
+except urllib.error.HTTPError as e:
+    print(e.code, "")
+except Exception:
+    print("000", "")' "$1" 2>/dev/null || echo "000"
+}
 
 if [ -n "$POD" ]; then
-  READY_JSON=$(kubectl exec -n "$NAMESPACE" "$POD" -- \
-    curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ready 2>/dev/null || echo "000")
+  READY_JSON=$(in_pod_get /ready | cut -d' ' -f1)
   if [ "$READY_JSON" = "200" ]; then
     echo "  ✅ /ready → 200 (API key + config are set)"
   else
     echo "  ⚠️  /ready → $READY_JSON (expected 200) – check the ConfigMap/Secret"
   fi
 
-  DOC_COUNT=$(kubectl exec -n "$NAMESPACE" "$POD" -- \
-    curl -s http://127.0.0.1:8080/api/documents 2>/dev/null \
-    | grep -o '"count":[0-9]*' | cut -d: -f2 || echo "?")
+  DOC_COUNT=$(in_pod_get /api/documents | grep -o '"count": *[0-9]*' | grep -o '[0-9]*$' || true)
+  DOC_COUNT=${DOC_COUNT:-?}
   # The emptyDir at /app/documents masks the seed corpus baked into the image;
   # a postStart hook copies it in. Count 0 means that hook did not run.
   if [ "$DOC_COUNT" = "0" ]; then

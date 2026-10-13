@@ -94,7 +94,7 @@ PANW-AIRS-GCP-K8S/
 │   ├── generate-traffic.sh      # Generate traffic before SCM onboarding
 │   ├── diagnose-airs.sh         # 🩺 Read-only diagnostics for the whole stack (run first)
 │   ├── reset-firewalls.sh       # 🔄 Reset all VM-Series + TC (quick fix for stuck cert retrieval)
-│   ├── patch-scm-terraform.sh   # ⚠️ Patch SCM TF (Cloud NAT on mgmt VPC – only when mgmt has no public IP)
+│   ├── patch-scm-terraform.sh   # Run before SCM TF apply – decides itself; patches Cloud NAT only when mgmt has no public IP
 │   ├── fix-routing.sh           # ⚠️ Fix routing (remove bypass route + default route in App VPC)
 │   ├── fix-health-check.sh      # ⚠️ Fix external LB health check (2 modes: live infra OR --terraform pre-apply)
 │   ├── deploy-tls-decryption.sh # Push AIRS Root CA to GKE (TLS decryption)
@@ -114,6 +114,12 @@ PANW-AIRS-GCP-K8S/
 ```
 
 ## Quick start
+
+> 📋 Before you start, work through the **pre-flight checklist and timeline** in
+> [DEPLOYMENT_GUIDE § 2.1–2.2](docs/DEPLOYMENT_GUIDE.md#21-pre-flight-checklist--gather-these-before-you-start)
+> (fresh Device Certificate PIN, both `gcloud auth` logins, exact AIRS profile name, SSH key…).
+> If the project or your workstation has other GKE clusters, read **§ 2.3** — bare
+> `kubectl`/`helm` commands act on the current context.
 
 ```bash
 # 0. (Optional) Configure secrets.env – SCM API credentials for diagnostic scripts
@@ -170,18 +176,26 @@ terraform init && terraform apply
 #    ⚠️ CHECK: Deployment Profile must be linked to a TSG in CSP!
 #    If you see "Finish Setup" in CSP → fix it BEFORE downloading the template.
 #    → Select applications, configure firewall
-#    → Download and apply the deployment Terraform (security_project + application_project)
+#    → Download the deployment Terraform, then BEFORE apply:
+#      ./scripts/patch-scm-terraform.sh <unzipped>/architecture/security_project
+#        (always run it – it decides; current templates → "PATCH NOT NEEDED")
+#      🔴 add ip_protocol = "UDP" to lbs_internal.internal-lb (DEPLOYMENT_GUIDE § 7.5a)
+#    → terraform apply security_project, then application_project
+#      (zone stockout / "route operation in progress" → see TROUBLESHOOTING § 33-34)
+#    → ./scripts/fix-routing.sh   (after EVERY application_project apply)
 
 # 6. In SCM: configure the firewall (interfaces, zones, NAT, routing)
-#    ⚠️ BEFORE Push Config: update content on the firewalls (URL/threat DB)
-#       A fresh PAN-OS image has stale content → 'remote-access' validation error
-#       See: docs/DEPLOYMENT_GUIDE.md section 7.6.1
+#    Content update only if Push fails with 'remote-access' is not a valid reference
+#       (older PAN-OS images) – see docs/DEPLOYMENT_GUIDE.md section 7.6.1
 #    Configure in order (see docs/DEPLOYMENT_GUIDE.md sections 8.1-8.13):
-#    - Zones, Interfaces, Loopbacks, Mgmt Profile, Logical Router (8.1-8.5)
+#    - Zones, Interfaces, Loopbacks, Mgmt Profile, Logical Router airs-lr (8.1-8.5)
+#      🔴 LR in the FOLDER scope (next hop = trust subnet .1, e.g. 10.1.2.1)
+#    - Zone k8s-cluster-1 + Traffic Object (LR = airs-lr) (8.5a) – before NAT/policies
 #    - PAN-OS Variables ($ELB, $ILB, $GKENODEIP, $CL_POD, $CL_SVC) (8.6)
 #    - NAT Policies: outbound (PODs2Internet) + inbound DNAT (8.7)
 #    - Security Policies: allow-inbound-web + allow-health-checks (8.8)
 #    → Push Config (tick "Ignore Security Checks" if shown)
+#    → ./scripts/fix-health-check.sh   (ELB health check; after EVERY security_project apply)
 
 # 6b. Open GCP-level FW rule on untrust for user traffic (TCP 80/443 from internet)
 #     SCM-generated TF only allows Google ELB health-check ranges → users blocked
@@ -205,7 +219,9 @@ TRUST_ILB=$(gcloud compute forwarding-rules list --project=$PROJECT_ID \
 #     1.35+ nodes and take them NotReady. No-op if extraNodeSelector is unset.
 ./scripts/patch-pan-cni-chart.sh $CHART
 # Edit kubernetes/cni/values-pan-cni.yaml: endpoints=$TRUST_ILB, fwtrustcidr, clusterid
-helm install ai-runtime-security $CHART -n kube-system \
+# 🔴 Other clusters in the project/workstation? Pin the context (DEPLOYMENT_GUIDE § 2.3):
+CTX=gke_${PROJECT_ID}_us-central1_airs-ai-cluster
+helm install ai-runtime-security $CHART -n kube-system --kube-context "$CTX" \
   --values kubernetes/cni/values-pan-cni.yaml
 kubectl get nodes    # all must stay Ready
 

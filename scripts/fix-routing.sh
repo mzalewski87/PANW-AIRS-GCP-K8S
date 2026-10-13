@@ -52,7 +52,15 @@ if [ -n "$BYPASS_ROUTE" ]; then
   BYPASS_PRIORITY=$(gcloud compute routes describe "$BYPASS_ROUTE" \
     --project="$PROJECT_ID" --format="value(priority)")
 
-  echo "  Found: $BYPASS_ROUTE (priority: $BYPASS_PRIORITY)"
+  # Keep the route's instance tags. SCM scopes it to `paloaltonetworks-firewall-bypass`,
+  # i.e. only VMs you deliberately tag skip the firewall. Re-creating it WITHOUT tags
+  # turns it into an untagged 0.0.0.0/0 → internet fallback for the whole VPC: harmless
+  # while the peering route (900) exists, a silent firewall bypass the moment it doesn't.
+  BYPASS_TAGS=$(gcloud compute routes describe "$BYPASS_ROUTE" \
+    --project="$PROJECT_ID" --format="value(tags.list())")
+  BYPASS_TAGS=${BYPASS_TAGS:-paloaltonetworks-firewall-bypass}
+
+  echo "  Found: $BYPASS_ROUTE (priority: $BYPASS_PRIORITY, tags: $BYPASS_TAGS)"
 
   if [ "$BYPASS_PRIORITY" -lt 1000 ]; then
     echo "  ⚠️  Priority $BYPASS_PRIORITY is too high — traffic bypasses the firewall!"
@@ -67,10 +75,17 @@ if [ -n "$BYPASS_ROUTE" ]; then
       --destination-range=0.0.0.0/0 \
       --next-hop-gateway=default-internet-gateway \
       --priority=1100 \
+      --tags="$BYPASS_TAGS" \
       --project="$PROJECT_ID"
-    echo "  ✅ Bypass route re-created with priority 1100"
+    echo "  ✅ Bypass route re-created with priority 1100 (tags: $BYPASS_TAGS)"
+  elif [ -z "$(gcloud compute routes describe "$BYPASS_ROUTE" --project="$PROJECT_ID" --format="value(tags.list())")" ]; then
+    echo "  ⚠️  $BYPASS_ROUTE has NO instance tags – it applies to every VM in $APP_VPC."
+    echo "     Earlier versions of this script re-created it untagged. Fix:"
+    echo "       gcloud compute routes delete $BYPASS_ROUTE --project=$PROJECT_ID --quiet"
+    echo "       then re-run this script after the next application_project apply,"
+    echo "       or re-create it with --tags=paloaltonetworks-firewall-bypass --priority=1100"
   else
-    echo "  ✅ Priority $BYPASS_PRIORITY is OK (>= 1000)"
+    echo "  ✅ Priority $BYPASS_PRIORITY is OK (>= 1000), tagged"
   fi
 else
   echo "  INFO: No bypass route — skipping"

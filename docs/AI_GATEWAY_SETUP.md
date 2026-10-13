@@ -195,6 +195,12 @@ The gateway needs to know where to send the model call.
    **Enable**) — until you do, every call fails no matter how the provider is set.
 5. Note the slug Portkey assigns, e.g. `<project>-4bcfc0ca9a07`.
 
+> 💡 **Moving to a new GCP project?** The provider is bound to one project ID. Create a
+> **new** Vertex AI provider for the new project (location `global`), enable Claude Haiku
+> in that project's Model Garden, and put the new slug into `portkey_provider_slug` (or
+> update the config behind `portkey_config_id`). See
+> [DEPLOYMENT_GUIDE § 13.8](DEPLOYMENT_GUIDE.md#138-redeploying--migrating-to-a-new-gcp-project).
+
 > ### ⚠️ Claude on Vertex is not in `us-central1` — use `global`
 > The rest of this demo runs in `us-central1`, but Anthropic models on Vertex AI
 > are not served there — point the provider at `us-central1` and every call 404s.
