@@ -164,7 +164,7 @@ probe() {
   # $1 = prompt → prints the HTTP status code
   local hdr_route=()
   [ -n "$PORTKEY_CONFIG" ]   && hdr_route+=(-H "x-portkey-config: $PORTKEY_CONFIG")
-  [ -n "$PORTKEY_PROVIDER" ] && hdr_route+=(-H "x-portkey-provider: @$PORTKEY_PROVIDER")
+  [ -n "$PORTKEY_PROVIDER" ] && hdr_route+=(-H "x-portkey-provider: @${PORTKEY_PROVIDER#@}")   # accept the slug with or without the leading @, like app.py
   curl -s -m 45 -o /tmp/gw-probe-body.json -w '%{http_code}' \
     -H "x-portkey-api-key: $PORTKEY_API_KEY" \
     "${hdr_route[@]}" \

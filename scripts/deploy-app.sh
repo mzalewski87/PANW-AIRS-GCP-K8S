@@ -260,7 +260,7 @@ AIRS_ENDPOINT=$(grep '^airs_api_endpoint' terraform.tfvars 2>/dev/null | head -1
 
 echo "  AIRS Profile:  $AIRS_PROFILE"
 echo "  AIRS Endpoint: $AIRS_ENDPOINT"
-echo "  AIRS API Key:  ${AIRS_API_KEY:+***set***}${AIRS_API_KEY:-NOT SET}"
+echo "  AIRS API Key:  $([ -n "$AIRS_API_KEY" ] && echo '***set***' || echo 'NOT SET')"
 
 # Substitute ALL placeholders in deployment YAML (don't apply yet)
 API_DEPLOY_YAML=$(cat kubernetes/api-chatbot/deployment.yaml)
